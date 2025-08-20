@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
+from collections import defaultdict
 
 # Load variables from .env files
 load_dotenv()
@@ -10,6 +11,8 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 REPORTER_ROLE_ID = os.getenv("REPORTER_ROLE_ID")
 REPORTER_BORDEAUX_ROLE_ID = os.getenv("REPORTER_BORDEAUX_ROLE_ID")
 PHOTO_CHANNEL_ID = int(os.getenv("PHOTO_CHANNEL_ID"))
+
+user_submissions = defaultdict(int) # Track number of photos per user
 
 # Set up bot
 intents = discord.Intents.default()
@@ -34,16 +37,43 @@ async def on_message(message):
         return
     # Check if message is in photo channel
     if message.channel.id == PHOTO_CHANNEL_ID:
-        # If message has no attachments (images)
+        user_id = message.author.id
+        
+        # If messages has no images (only text)
         if len(message.attachments) == 0:
-            # Delete the message
             await message.delete()
-                # Send warning to user
             await message.author.send(
-                """❌ Les messages texte ne sont **pas autorisés** dans le canal photo.
-Merci de ne poster que **des photos**.
-                """
+                "❌ Les messages texte ne sont **pas autorisés** dans le canal photo.\n"
+                "Merci de ne poster que **des photos**."
             )
+            return
+
+        # If messages has more than 1 image
+        if len(message.attachments) > 1:
+            await message.delete()
+            await message.author.send(
+                "❌ Vous ne pouvez poster qu'**une seule photo** par semaine.\n"
+                "Merci de ne partager qu'une seule image à la fois."
+            )
+        
+        if user_submissions[user_id] >= 1:
+            await message.delete()
+            await message.author.send(
+                "❌ Vous avez déjà partagé une photo cette semaine.\n"
+                "Merci d'attendre la semaine prochaine pour en partager une nouvelle."
+            )
+            return
+        
+        user_submissions[user_id] += 1
+
+@bot.event
+async def on_message_delete(message):
+    # If deleted message was in photo channel and had an image
+    if message.channel.id == PHOTO_CHANNEL_ID and len(message.attachments) > 0:
+        user_id = message.author.id
+        # Reset user's submission count
+        if user_id in user_submissions:
+            user_submissions[user_id] = 0
 
 @bot.tree.command(name="partage_photo", description="Ping les reporters pour partager leur photos")
 async def partage_photo(interaction: discord.Interaction):
