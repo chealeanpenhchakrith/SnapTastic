@@ -26,7 +26,25 @@ async def on_ready():
         print(f"Synced {len(synced)} command(s)")
     except Exception as e:
         print(e)
-    
+
+@bot.event
+async def on_message(message):
+    # ignore bot's own messages
+    if message.author == bot.user:
+        return
+    # Check if message is in photo channel
+    if message.channel.id == PHOTO_CHANNEL_ID:
+        # If message has no attachments (images)
+        if len(message.attachments) == 0:
+            # Delete the message
+            await message.delete()
+                # Send warning to user
+            await message.author.send(
+                """❌ Les messages texte ne sont **pas autorisés** dans le canal photo.
+Merci de ne poster que **des photos**.
+                """
+            )
+
 @bot.tree.command(name="partage_photo", description="Ping les reporters pour partager leur photos")
 async def partage_photo(interaction: discord.Interaction):
         photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
