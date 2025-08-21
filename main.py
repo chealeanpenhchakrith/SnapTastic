@@ -1,5 +1,6 @@
 import os
 import discord
+import asyncio
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
@@ -12,6 +13,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 REPORTER_ROLE_ID = os.getenv("REPORTER_ROLE_ID")
 REPORTER_BORDEAUX_ROLE_ID = os.getenv("REPORTER_BORDEAUX_ROLE_ID")
 PHOTO_CHANNEL_ID = int(os.getenv("PHOTO_CHANNEL_ID"))
+PHOTO_RESULT_CHANNEL_ID = int(os.getenv("PHOTO_RESULT_CHANNEL_ID"))
 VOTE_EMOJI = os.getenv("VOTE_EMOJI", "🗳️")
 
 user_submissions = defaultdict(int) # Track number of photos per user
@@ -78,8 +80,8 @@ async def on_message_delete(message):
         if user_id in user_submissions:
             user_submissions[user_id] = 0
 
-@bot.tree.command(name="partage_photo", description="Ping les reporters pour partager leur photos")
-async def partage_photo(interaction: discord.Interaction):
+@bot.tree.command(name="partage-photo", description="Ping les reporters pour partager leur photos")
+async def share_photo(interaction: discord.Interaction):
         global last_photo_call
         photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
         last_photo_call = datetime.now(timezone.utc)
@@ -164,5 +166,101 @@ Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
     last_photo_call = None
     
     await interaction.response.send_message("Phase de votes ouverte !", ephemeral=True)
+
+@bot.tree.command(name="fermeture-des-votes", description="Ferme les votes et annonce les résultats")
+async def close_votes(interaction: discord.Interaction):
+    try:
+        # Defer response immediately
+        await interaction.response.defer(ephemeral=True)
+        
+        # Get channels
+        photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
+        results_channel = bot.get_channel(PHOTO_RESULT_CHANNEL_ID)
+        guild = interaction.guild
+        
+        # Fetch active threads
+        active_threads = await guild.active_threads()
+        voting_thread = None
+        
+        # Find voting thread from photo channel
+        for thread in active_threads:
+            if thread.parent_id == PHOTO_CHANNEL_ID and thread.name.startswith("📊 Votes"):
+                voting_thread = thread
+                break
+        
+        if not voting_thread:
+            await interaction.followup.send(
+                "❌ Aucun fil de vote actif trouvé.",
+                ephemeral=True
+            )
+            return
+        
+        # Cache image URLs and collect votes
+        vote_counts = {}
+        cached_images = {}
+        
+        async for message in voting_thread.history(limit=None):
+            if message.embeds and len(message.embeds) > 0:
+                author = message.content.split("Photo de ")[1].rstrip(":")
+                cached_images[message.id] = message.embeds[0].image.url
+                
+                for reaction in message.reactions:
+                    if str(reaction.emoji) == VOTE_EMOJI:
+                        vote_counts[message] = {
+                            'votes': reaction.count - 1,
+                            'author': author,
+                            'image_url': cached_images[message.id]
+                        }
+                        print(f"Found photo by {author} with {reaction.count - 1} votes")
+                        break
+        
+        if not vote_counts:
+            await interaction.followup.send("❌ Aucun vote n'a été trouvé.", ephemeral=True)
+            return
+        
+        # Find winner(s)
+        max_votes = max(data['votes'] for data in vote_counts.values())
+        winners = [(msg, data) for msg, data in vote_counts.items() 
+                  if data['votes'] == max_votes]
+        
+        # Format results message
+        if len(winners) == 1:
+            _, winner_data = winners[0]
+            result = f"""🏆 **Le gagnant de la semaine est {winner_data['author']} avec {max_votes} votes !**
+
+Félicitations ! Voici la photo gagnante :"""
+        else:
+            authors = ", ".join(data['author'] for _, data in winners)
+            result = f"""🏆 **Nous avons une égalité avec {max_votes} votes chacun !**
+            
+Félicitations à {authors} !
+
+Voici les photos gagnantes :"""
+        
+        # Send results
+        await results_channel.send(result)
+        
+        # Send winning photos using cached URLs
+        for _, data in winners:
+            embed = discord.Embed().set_image(url=data['image_url'])
+            await results_channel.send(embed=embed)
+        
+        # Wait for content to be processed
+        await asyncio.sleep(3)
+        
+        # Archive thread after ensuring content is sent
+        await voting_thread.edit(archived=True, locked=True)
+        
+        await interaction.followup.send(
+            "✅ Votes terminés et résultats annoncés !",
+            ephemeral=True
+        )
+        
+    except Exception as e:
+        print(f"Error in close_votes: {e}")
+        await interaction.followup.send(
+            "❌ Une erreur s'est produite lors de la fermeture des votes.",
+            ephemeral=True
+        )
 # Run bot using the token fron .env
 bot.run(TOKEN)
