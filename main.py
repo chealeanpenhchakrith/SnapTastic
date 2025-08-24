@@ -1,6 +1,9 @@
 import os
+import json
+import re
 import discord
 import asyncio
+from pathlib import Path
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
@@ -36,6 +39,52 @@ tz = ZoneInfo(TIMEZONE)
 
 user_submissions = defaultdict(int)
 last_photo_call = None
+
+# Simple JSON-backed winners store
+class WinnersStore:
+    def __init__(self, path: Path):
+        self.path = path
+        self._winners = set()
+        self._load()
+
+    def _load(self):
+        try:
+            if self.path.exists():
+                with self.path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._winners = set(int(x) for x in data.get("winners", []))
+            else:
+                self.save()
+        except Exception:
+            self._winners = set()
+
+    def save(self):
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("w", encoding="utf-8") as f:
+                json.dump({"winners": sorted(self._winners)}, f, indent=2)
+        except Exception:
+            pass
+
+    def add(self, user_id: int):
+        if user_id not in self._winners:
+            self._winners.add(user_id)
+            self.save()
+
+    def remove(self, user_id: int) -> bool:
+        if user_id in self._winners:
+            self._winners.remove(user_id)
+            self.save()
+            return True
+        return False
+
+    def contains(self, user_id: int) -> bool:
+        return user_id in self._winners
+
+    def all(self):
+        return sorted(self._winners)
+
+winners_store = WinnersStore(Path(__file__).with_name("winners.json"))
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -149,48 +198,88 @@ async def close_votes_and_announce_auto():
         print("close_votes_and_announce_auto: no active voting thread found")
         return
 
-    vote_counts = {}
-    cached_images = {}
+    # Collect entries from the voting thread
+    entries = []
     async for message in voting_thread.history(limit=None):
         if message.embeds and len(message.embeds) > 0:
-            content = message.content or ""
+            content = (message.content or "").strip()
+            # Expecting: "Photo de <@1234567890>:"
+            author_mention = None
+            author_id = None
             if content.startswith("Photo de "):
-                author = content.split("Photo de ")[1].rstrip(":").strip()
-            else:
-                author = message.author.mention
+                part = content.split("Photo de ", 1)[1].rstrip(":").strip()
+                author_mention = part
+                m = re.match(r"<@!?(\d+)>", part)
+                if m:
+                    author_id = int(m.group(1))
+
             try:
                 img_url = message.embeds[0].image.url
             except Exception:
                 img_url = None
-            cached_images[message.id] = img_url
 
+            # Count votes (prefer VOTE_EMOJI, fallback to ✅)
+            votes = 0
+            found_vote_reaction = False
             for reaction in message.reactions:
                 if str(reaction.emoji) == VOTE_EMOJI:
-                    votes = max(0, reaction.count - 1)
-                    vote_counts[message] = {"votes": votes, "author": author, "image_url": img_url}
+                    votes = max(0, reaction.count - 1)  # minus bot reaction
+                    found_vote_reaction = True
                     break
+            if not found_vote_reaction:
+                for reaction in message.reactions:
+                    if str(reaction.emoji) == "✅":
+                        votes = max(0, reaction.count - 1)
+                        break
 
-    if not vote_counts:
+            if img_url and author_id:
+                entries.append({
+                    "message": message,
+                    "author_id": author_id,
+                    "author_mention": author_mention or f"<@{author_id}>",
+                    "image_url": img_url,
+                    "votes": votes
+                })
+
+    if not entries:
         await results_channel.send("❌ Aucun vote n'a été trouvé.")
         print("close_votes_and_announce_auto: no votes found")
         return
 
-    max_votes = max(data["votes"] for data in vote_counts.values())
-    winners = [(msg, data) for msg, data in vote_counts.items() if data["votes"] == max_votes]
+    # Exclude past winners from eligibility
+    eligible = [e for e in entries if not winners_store.contains(e["author_id"])]
+
+    if not eligible:
+        await results_channel.send("⚠️ Aucun gagnant éligible cette semaine (tous les participants ont déjà gagné auparavant).")
+        try:
+            await results_channel.send(f"📁 Fil des votes : {voting_thread.jump_url}")
+        except Exception:
+            pass
+        try:
+            await voting_thread.edit(archived=False, locked=True)
+        except Exception:
+            pass
+        print("close_votes_and_announce_auto: no eligible winners")
+        return
+
+    max_votes = max(e["votes"] for e in eligible)
+    winners = [e for e in eligible if e["votes"] == max_votes]
 
     if len(winners) == 1:
-        _, winner_data = winners[0]
-        result = f"🏆 **Le gagnant de la semaine est {winner_data['author']} avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :"
+        w = winners[0]
+        result = f"🏆 **Le gagnant de la semaine est {w['author_mention']} avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :"
+        await results_channel.send(result)
+        await results_channel.send(embed=discord.Embed().set_image(url=w["image_url"]))
     else:
-        authors = ", ".join(data["author"] for _, data in winners)
-        result = f"🏆 **Nous avons une égalité avec {max_votes} votes chacun !**\n\nFélicitations à {authors} !\n\nVoici les photos gagnantes :"
+        authors = ", ".join(e["author_mention"] for e in winners)
+        result = f"🏆 **Égalité avec {max_votes} votes chacun !**\n\nFélicitations à {authors} !\n\nVoici les photos gagnantes :"
+        await results_channel.send(result)
+        for e in winners:
+            await results_channel.send(embed=discord.Embed().set_image(url=e["image_url"]))
 
-    await results_channel.send(result)
-    for _, data in winners:
-        if data["image_url"]:
-            await results_channel.send(embed=discord.Embed().set_image(url=data["image_url"]))
-        else:
-            await results_channel.send(f"{data['author']} (image unavailable)")
+    # Persist the winners so they can't win again
+    for e in winners:
+        winners_store.add(e["author_id"])
 
     # post thread link so users can open it easily, then lock but do NOT archive
     try:
@@ -244,6 +333,21 @@ async def close_votes(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     await close_votes_and_announce_auto()
     await interaction.followup.send("✅ Votes terminés et résultats annoncés !", ephemeral=True)
+
+
+# Admin command to remove a user from past winners
+@bot.tree.command(name="winners-remove", description="Retire un utilisateur de la liste des gagnants passés (réautorise à gagner)")
+@app_commands.describe(user="Utilisateur à réautoriser pour de futurs concours")
+async def winners_remove(interaction: discord.Interaction, user: discord.User):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Autorisation refusée. Administrateur requis.", ephemeral=True)
+        return
+
+    removed = winners_store.remove(user.id)
+    if removed:
+        await interaction.response.send_message(f"✅ {user.mention} a été retiré de la liste des gagnants passés.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"ℹ️ {user.mention} n'était pas dans la liste des gagnants.", ephemeral=True)
 
 
 # Scheduler utilities
@@ -383,5 +487,5 @@ async def on_message_delete(message):
                 user_submissions[user_id] = 0
     except Exception:
         pass
-    
+
 bot.run(TOKEN)
