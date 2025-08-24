@@ -5,87 +5,55 @@ from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
-# Load variables from .env files
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 REPORTER_ROLE_ID = os.getenv("REPORTER_ROLE_ID")
 REPORTER_BORDEAUX_ROLE_ID = os.getenv("REPORTER_BORDEAUX_ROLE_ID")
-PHOTO_CHANNEL_ID = int(os.getenv("PHOTO_CHANNEL_ID"))
-PHOTO_RESULT_CHANNEL_ID = int(os.getenv("PHOTO_RESULT_CHANNEL_ID"))
+PHOTO_CHANNEL_ID = int(os.getenv("PHOTO_CHANNEL_ID", "0"))
+PHOTO_RESULT_CHANNEL_ID = int(os.getenv("PHOTO_RESULT_CHANNEL_ID", "0"))
 VOTE_EMOJI = os.getenv("VOTE_EMOJI", "🗳️")
 
-user_submissions = defaultdict(int) # Track number of photos per user
-last_photo_call = None # Track when /partage-photo was last run
+TIMEZONE = os.getenv("TIMEZONE", "Europe/Paris")
+SHARE_WEEKDAY = int(os.getenv("SHARE_WEEKDAY", "6"))   # Monday=0 .. Sunday=6
+SHARE_HOUR = int(os.getenv("SHARE_HOUR", "21"))
+SHARE_MIN = int(os.getenv("SHARE_MIN", "39"))
 
-# Set up bot
+OPEN_WEEKDAY = int(os.getenv("OPEN_WEEKDAY", "6"))     # default Saturday
+OPEN_HOUR = int(os.getenv("OPEN_HOUR", "21"))
+OPEN_MIN = int(os.getenv("OPEN_MIN", "40"))
+
+RESULT_WEEKDAY = int(os.getenv("RESULT_WEEKDAY", "6")) # default Sunday
+RESULT_HOUR = int(os.getenv("RESULT_HOUR", "21"))
+RESULT_MIN = int(os.getenv("RESULT_MIN", "41"))
+
+TEST_MODE = os.getenv("TEST_MODE", "0") == "1"
+TEST_WAIT_SEC = int(os.getenv("TEST_WAIT_SEC", "10"))
+
+tz = ZoneInfo(TIMEZONE)
+
+user_submissions = defaultdict(int)
+last_photo_call = None
+
 intents = discord.Intents.default()
-intents.message_content = True # Allow to read messages
+intents.message_content = True
 intents.guilds = True
+intents.messages = True
+intents.reactions = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user}")
-    
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(e)
 
-@bot.event
-async def on_message(message):
-    # ignore bot's own messages
-    if message.author == bot.user:
+# Helpers (non-interactive versions)
+async def send_partage_message_auto():
+    global last_photo_call
+    photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
+    if photo_channel is None:
+        print("send_partage_message_auto: photo channel not found")
         return
-    # Check if message is in photo channel
-    if message.channel.id == PHOTO_CHANNEL_ID:
-        user_id = message.author.id
-        
-        # If messages has no images (only text)
-        if len(message.attachments) == 0:
-            await message.delete()
-            await message.author.send(
-                "❌ Les messages texte ne sont **pas autorisés** dans le canal photo.\n"
-                "Merci de ne poster que **des photos**."
-            )
-            return
-
-        # If messages has more than 1 image
-        if len(message.attachments) > 1:
-            await message.delete()
-            await message.author.send(
-                "❌ Vous ne pouvez poster qu'**une seule photo** par semaine.\n"
-                "Merci de ne partager qu'une seule image à la fois."
-            )
-        
-        if user_submissions[user_id] >= 1:
-            await message.delete()
-            await message.author.send(
-                "❌ Vous avez déjà partagé une photo cette semaine.\n"
-                "Merci d'attendre la semaine prochaine pour en partager une nouvelle."
-            )
-            return
-        
-        user_submissions[user_id] += 1
-
-@bot.event
-async def on_message_delete(message):
-    # If deleted message was in photo channel and had an image
-    if message.channel.id == PHOTO_CHANNEL_ID and len(message.attachments) > 0:
-        user_id = message.author.id
-        # Reset user's submission count
-        if user_id in user_submissions:
-            user_submissions[user_id] = 0
-
-@bot.tree.command(name="partage-photo", description="Ping les reporters pour partager leur photos")
-async def share_photo(interaction: discord.Interaction):
-        global last_photo_call
-        photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
-        last_photo_call = datetime.now(timezone.utc)
-        message = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
+    last_photo_call = datetime.now(timezone.utc)
+    message = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 
 Une **nouvelle semaine** commence ✨ 
 C'est le moment idéal pour partager vos plus belles photos dans ce canal 📸
@@ -98,47 +66,36 @@ C'est le moment idéal pour partager vos plus belles photos dans ce canal 📸
 • Le ou la gagnant(e) sera annoncé(e) **dimanche soir** 🏆
 
 Bonne chance à toutes et à tous, et amusez-vous bien 🎉"""
-        
-        # Send message to photo channel
-        await photo_channel.send(
-            content=message,
-            allowed_mentions=discord.AllowedMentions(roles=True)
-        )
-        
-        # Confirm to user who ran the command
-        await interaction.response.send_message(
-            "Message envoyé dans le canal photo!", 
-            ephemeral=True
-        )
+    try:
+        await photo_channel.send(content=message, allowed_mentions=discord.AllowedMentions(roles=True))
+        print("Automated: partage message sent")
+    except Exception as e:
+        print("send_partage_message_auto error:", e)
 
-@bot.tree.command(name="ouverture-des-votes", description="Ouvre la phase des votes")
-async def open_votes(interaction: discord.Interaction):
-    global last_photo_call
-    if not last_photo_call:
-        await interaction.response.send_message(
-            "❌ Aucun appel à photos n'a été fait. Utilisez d'abord /partage-photo",
-            ephemeral=True
-        )
-        return
 
+async def create_vote_thread_from_photos_auto():
+    global last_photo_call, user_submissions
     photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
-    thread = await photo_channel.create_thread(
-        name=f"📊 Votes - {datetime.now().strftime('%d/%m/%Y')}",
-        auto_archive_duration=1440
-    )
-    
+    if photo_channel is None:
+        print("create_vote_thread_from_photos_auto: photo channel not found")
+        return None
+
     messages = []
-    async for message in photo_channel.history(limit=100):
-        if message.created_at < last_photo_call:
-            break
-        if message.attachments:
-            messages.append(message)
-    
+    async for msg in photo_channel.history(limit=500):
+        if last_photo_call and msg.created_at < last_photo_call:
+            continue
+        if msg.attachments:
+            messages.append(msg)
+
     if not messages:
-        await thread.send("Aucune photo n'a été partagée depuis l'appel !")
-        await interaction.response.send_message("Fil créé, mais aucune photo trouvée", ephemeral=True)
-        return
-    
+        return None
+
+    thread = await photo_channel.create_thread(
+        name=f"📊 Votes - {datetime.now(tz).strftime('%d/%m/%Y')}",
+        auto_archive_duration=1440,
+        reason="Automated open votes"
+    )
+
     intro = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 
 **🗳️ La phase de votes est ouverte !**
@@ -146,121 +103,285 @@ async def open_votes(interaction: discord.Interaction):
 Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
 
 • Vous pouvez voter pour plusieurs photos
-• Les votes sont ouverts jusqu'à dimanche 18h00
+• Les votes sont ouverts jusqu'à dimanche 18:00
 • Le/la gagnant(e) sera annoncé(e) dimanche soir
 
 **📸 __Voici les photos soumises :__**
 ⠀"""
-
     await thread.send(intro)
+
     for msg in reversed(messages):
-        # Modified - URL should display cleanly in Discord without filename
-        photo_message = await thread.send(
-        content=f"Photo de {msg.author.mention}:",
-        embed=discord.Embed().set_image(url=msg.attachments[0].url)
-        )
-        await photo_message.add_reaction(VOTE_EMOJI)
-    
-    # Reset for next week
+        try:
+            photo_message = await thread.send(
+                content=f"Photo de {msg.author.mention}:",
+                embed=discord.Embed().set_image(url=msg.attachments[0].url)
+            )
+            try:
+                await photo_message.add_reaction(VOTE_EMOJI)
+            except Exception:
+                await photo_message.add_reaction("✅")
+        except Exception:
+            print("create_vote_thread_from_photos_auto: failed to post one photo")
+            continue
+
     user_submissions.clear()
     last_photo_call = None
-    
-    await interaction.response.send_message("Phase de votes ouverte !", ephemeral=True)
+    return thread
 
-@bot.tree.command(name="fermeture-des-votes", description="Ferme les votes et annonce les résultats")
-async def close_votes(interaction: discord.Interaction):
-    try:
-        # Defer response immediately
-        await interaction.response.defer(ephemeral=True)
-        
-        # Get channels
-        photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
-        results_channel = bot.get_channel(PHOTO_RESULT_CHANNEL_ID)
-        guild = interaction.guild
-        
-        # Fetch active threads
-        active_threads = await guild.active_threads()
-        voting_thread = None
-        
-        # Find voting thread from photo channel
+
+async def close_votes_and_announce_auto():
+    results_channel = bot.get_channel(PHOTO_RESULT_CHANNEL_ID)
+    if results_channel is None:
+        print("close_votes_and_announce_auto: results channel not found")
+        return
+
+    voting_thread = None
+    for g in bot.guilds:
+        active_threads = await g.active_threads()
         for thread in active_threads:
             if thread.parent_id == PHOTO_CHANNEL_ID and thread.name.startswith("📊 Votes"):
                 voting_thread = thread
                 break
-        
-        if not voting_thread:
-            await interaction.followup.send(
-                "❌ Aucun fil de vote actif trouvé.",
-                ephemeral=True
-            )
-            return
-        
-        # Cache image URLs and collect votes
-        vote_counts = {}
-        cached_images = {}
-        
-        async for message in voting_thread.history(limit=None):
-            if message.embeds and len(message.embeds) > 0:
-                author = message.content.split("Photo de ")[1].rstrip(":")
-                cached_images[message.id] = message.embeds[0].image.url
-                
-                for reaction in message.reactions:
-                    if str(reaction.emoji) == VOTE_EMOJI:
-                        vote_counts[message] = {
-                            'votes': reaction.count - 1,
-                            'author': author,
-                            'image_url': cached_images[message.id]
-                        }
-                        print(f"Found photo by {author} with {reaction.count - 1} votes")
-                        break
-        
-        if not vote_counts:
-            await interaction.followup.send("❌ Aucun vote n'a été trouvé.", ephemeral=True)
-            return
-        
-        # Find winner(s)
-        max_votes = max(data['votes'] for data in vote_counts.values())
-        winners = [(msg, data) for msg, data in vote_counts.items() 
-                  if data['votes'] == max_votes]
-        
-        # Format results message
-        if len(winners) == 1:
-            _, winner_data = winners[0]
-            result = f"""🏆 **Le gagnant de la semaine est {winner_data['author']} avec {max_votes} votes !**
+        if voting_thread:
+            break
 
-Félicitations ! Voici la photo gagnante :"""
+    if not voting_thread:
+        print("close_votes_and_announce_auto: no active voting thread found")
+        return
+
+    vote_counts = {}
+    cached_images = {}
+    async for message in voting_thread.history(limit=None):
+        if message.embeds and len(message.embeds) > 0:
+            content = message.content or ""
+            if content.startswith("Photo de "):
+                author = content.split("Photo de ")[1].rstrip(":").strip()
+            else:
+                author = message.author.mention
+            try:
+                img_url = message.embeds[0].image.url
+            except Exception:
+                img_url = None
+            cached_images[message.id] = img_url
+
+            for reaction in message.reactions:
+                if str(reaction.emoji) == VOTE_EMOJI:
+                    votes = max(0, reaction.count - 1)
+                    vote_counts[message] = {"votes": votes, "author": author, "image_url": img_url}
+                    break
+
+    if not vote_counts:
+        await results_channel.send("❌ Aucun vote n'a été trouvé.")
+        print("close_votes_and_announce_auto: no votes found")
+        return
+
+    max_votes = max(data["votes"] for data in vote_counts.values())
+    winners = [(msg, data) for msg, data in vote_counts.items() if data["votes"] == max_votes]
+
+    if len(winners) == 1:
+        _, winner_data = winners[0]
+        result = f"🏆 **Le gagnant de la semaine est {winner_data['author']} avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :"
+    else:
+        authors = ", ".join(data["author"] for _, data in winners)
+        result = f"🏆 **Nous avons une égalité avec {max_votes} votes chacun !**\n\nFélicitations à {authors} !\n\nVoici les photos gagnantes :"
+
+    await results_channel.send(result)
+    for _, data in winners:
+        if data["image_url"]:
+            await results_channel.send(embed=discord.Embed().set_image(url=data["image_url"]))
         else:
-            authors = ", ".join(data['author'] for _, data in winners)
-            result = f"""🏆 **Nous avons une égalité avec {max_votes} votes chacun !**
-            
-Félicitations à {authors} !
+            await results_channel.send(f"{data['author']} (image unavailable)")
 
-Voici les photos gagnantes :"""
-        
-        # Send results
-        await results_channel.send(result)
-        
-        # Send winning photos using cached URLs
-        for _, data in winners:
-            embed = discord.Embed().set_image(url=data['image_url'])
-            await results_channel.send(embed=embed)
-        
-        # Wait for content to be processed
-        await asyncio.sleep(3)
-        
-        # Archive thread after ensuring content is sent
-        await voting_thread.edit(archived=True, locked=True)
-        
-        await interaction.followup.send(
-            "✅ Votes terminés et résultats annoncés !",
-            ephemeral=True
+    # post thread link so users can open it easily, then lock but do NOT archive
+    try:
+        await results_channel.send(f"📁 Fil des votes : {voting_thread.jump_url}")
+    except Exception:
+        pass
+
+    await asyncio.sleep(2)
+    try:
+        await voting_thread.edit(archived=False, locked=True)
+    except Exception:
+        pass
+
+    print("close_votes_and_announce_auto: done")
+
+
+# Manual commands (reuse helpers where appropriate)
+@bot.tree.command(name="partage-photo", description="Ping les reporters pour partager leur photos")
+async def share_photo(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    await send_partage_message_auto()
+    await interaction.followup.send("Message envoyé dans le canal photo!", ephemeral=True)
+
+
+@bot.tree.command(name="ouverture-des-votes", description="Ouvre la phase des votes")
+async def open_votes(interaction: discord.Interaction):
+    global last_photo_call
+    await interaction.response.defer(ephemeral=True)
+
+    if not last_photo_call:
+        await interaction.followup.send("❌ Aucun appel à photos n'a été fait. Utilisez d'abord /partage-photo", ephemeral=True)
+        return
+
+    thread = await create_vote_thread_from_photos_auto()
+    if thread is None:
+        # create thread manually to keep interface consistent
+        photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
+        thread = await photo_channel.create_thread(
+            name=f"📊 Votes - {datetime.now(tz).strftime('%d/%m/%Y')}",
+            auto_archive_duration=1440
         )
-        
+        await thread.send("Aucune photo n'a été partagée depuis l'appel !")
+        await interaction.followup.send("Fil créé, mais aucune photo trouvée", ephemeral=True)
+        return
+
+    await interaction.followup.send("Phase de votes ouverte !", ephemeral=True)
+
+
+@bot.tree.command(name="fermeture-des-votes", description="Ferme les votes et annonce les résultats")
+async def close_votes(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    await close_votes_and_announce_auto()
+    await interaction.followup.send("✅ Votes terminés et résultats annoncés !", ephemeral=True)
+
+
+# Scheduler utilities
+def next_weekday_dt(now, target_weekday, hour, minute):
+    days_ahead = (target_weekday - now.weekday()) % 7
+    candidate = (now + timedelta(days=days_ahead)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate = candidate + timedelta(days=7)
+    return candidate
+
+
+async def scheduler_loop():
+    await bot.wait_until_ready()
+    print("Scheduler started. TIMEZONE =", TIMEZONE)
+    while not bot.is_closed():
+        now = datetime.now(tz)
+        share_dt = next_weekday_dt(now, SHARE_WEEKDAY, SHARE_HOUR, SHARE_MIN)
+        open_dt = next_weekday_dt(now, OPEN_WEEKDAY, OPEN_HOUR, OPEN_MIN)
+        result_dt = next_weekday_dt(now, RESULT_WEEKDAY, RESULT_HOUR, RESULT_MIN)
+
+        next_event_name, next_event_dt = min(
+            [("share", share_dt), ("open", open_dt), ("result", result_dt)],
+            key=lambda x: x[1]
+        )
+
+        wait_seconds = (next_event_dt - now).total_seconds()
+        print(f"Next scheduled event: {next_event_name} at {next_event_dt.isoformat()} (in {int(wait_seconds)}s)")
+        await asyncio.sleep(max(0, wait_seconds))
+
+        try:
+            if next_event_name == "share":
+                await send_partage_message_auto()
+            elif next_event_name == "open":
+                await create_vote_thread_from_photos_auto()
+            elif next_event_name == "result":
+                await close_votes_and_announce_auto()
+        except Exception as e:
+            print("Scheduled event error:", e)
+
+        await asyncio.sleep(1)
+
+
+async def run_quick_test():
+    await bot.wait_until_ready()
+    await asyncio.sleep(1)
+    print("TEST_MODE quick sequence starting")
+    await send_partage_message_auto()
+    await asyncio.sleep(TEST_WAIT_SEC)
+    await create_vote_thread_from_photos_auto()
+    await asyncio.sleep(TEST_WAIT_SEC)
+    await close_votes_and_announce_auto()
+    print("TEST_MODE quick sequence finished")
+
+
+# Hook scheduler on startup
+_original_on_ready = getattr(bot, "on_ready", None)
+
+
+@bot.event
+async def on_ready():
+    if _original_on_ready:
+        try:
+            await _original_on_ready()
+        except Exception:
+            pass
+
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
     except Exception as e:
-        print(f"Error in close_votes: {e}")
-        await interaction.followup.send(
-            "❌ Une erreur s'est produite lors de la fermeture des votes.",
-            ephemeral=True
-        )
-# Run bot using the token fron .env
+        print(e)
+
+    if TEST_MODE:
+        bot.loop.create_task(run_quick_test())
+    else:
+        bot.loop.create_task(scheduler_loop())
+
+
+# Message handlers (keep existing behavior)
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+    if message.channel.id == PHOTO_CHANNEL_ID:
+        user_id = message.author.id
+        if len(message.attachments) == 0:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                await message.author.send(
+                    "❌ Les messages texte ne sont **pas autorisés** dans le canal photo.\n"
+                    "Merci de ne poster que **des photos**."
+                )
+            except Exception:
+                pass
+            return
+
+        if len(message.attachments) > 1:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                await message.author.send(
+                    "❌ Vous ne pouvez poster qu'**une seule photo** par semaine.\n"
+                    "Merci de ne partager qu'une seule image à la fois."
+                )
+            except Exception:
+                pass
+            return
+
+        if user_submissions[user_id] >= 1:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                await message.author.send(
+                    "❌ Vous avez déjà partagé une photo cette semaine.\n"
+                    "Merci d'attendre la semaine prochaine pour en partager une nouvelle."
+                )
+            except Exception:
+                pass
+            return
+
+        user_submissions[user_id] += 1
+
+
+@bot.event
+async def on_message_delete(message):
+    try:
+        if message.channel.id == PHOTO_CHANNEL_ID and len(message.attachments) > 0:
+            user_id = message.author.id
+            if user_id in user_submissions:
+                user_submissions[user_id] = 0
+    except Exception:
+        pass
+    
 bot.run(TOKEN)
