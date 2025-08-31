@@ -21,22 +21,20 @@ VOTE_EMOJI = os.getenv("VOTE_EMOJI", "🗳️")
 
 # === Monthly contest settings ===
 MONTHLY_ENABLED = os.getenv("MONTHLY_ENABLED", "1") == "1"
-# Duration of monthly voting in minutes (default 48 hours)
 MONTHLY_VOTE_DURATION_MIN = int(os.getenv("MONTHLY_VOTE_DURATION_MIN", "2880"))
-# Reuse the same emoji as weekly by default
 MONTHLY_VOTE_EMOJI = os.getenv("MONTHLY_VOTE_EMOJI", VOTE_EMOJI)
 # ================================
 
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Paris")
-SHARE_WEEKDAY = int(os.getenv("SHARE_WEEKDAY", "6"))   # Monday=0 .. Sunday=6
+SHARE_WEEKDAY = int(os.getenv("SHARE_WEEKDAY", "6"))
 SHARE_HOUR = int(os.getenv("SHARE_HOUR", "21"))
 SHARE_MIN = int(os.getenv("SHARE_MIN", "39"))
 
-OPEN_WEEKDAY = int(os.getenv("OPEN_WEEKDAY", "6"))     # default Saturday
+OPEN_WEEKDAY = int(os.getenv("OPEN_WEEKDAY", "6"))
 OPEN_HOUR = int(os.getenv("OPEN_HOUR", "21"))
 OPEN_MIN = int(os.getenv("OPEN_MIN", "40"))
 
-RESULT_WEEKDAY = int(os.getenv("RESULT_WEEKDAY", "6")) # default Sunday
+RESULT_WEEKDAY = int(os.getenv("RESULT_WEEKDAY", "6"))
 RESULT_HOUR = int(os.getenv("RESULT_HOUR", "21"))
 RESULT_MIN = int(os.getenv("RESULT_MIN", "41"))
 
@@ -53,6 +51,7 @@ class WinnersStore:
     def __init__(self, path: Path):
         self.path = path
         self._winners = set()
+        self._monthly_winners = set()
         self._load()
 
     def _load(self):
@@ -61,16 +60,21 @@ class WinnersStore:
                 with self.path.open("r", encoding="utf-8") as f:
                     data = json.load(f)
                 self._winners = set(int(x) for x in data.get("winners", []))
+                self._monthly_winners = set(int(x) for x in data.get("monthly_winners", []))
             else:
                 self.save()
         except Exception:
             self._winners = set()
+            self._monthly_winners = set()
 
     def save(self):
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("w", encoding="utf-8") as f:
-                json.dump({"winners": sorted(self._winners)}, f, indent=2)
+                json.dump({
+                    "winners": sorted(self._winners),
+                    "monthly_winners": sorted(self._monthly_winners)
+                }, f, indent=2)
         except Exception:
             pass
 
@@ -79,9 +83,16 @@ class WinnersStore:
             self._winners.add(user_id)
             self.save()
 
-    def remove(self, user_id: int) -> bool:
+    def remove_weekly(self, user_id: int) -> bool:
         if user_id in self._winners:
             self._winners.remove(user_id)
+            self.save()
+            return True
+        return False
+
+    def remove_monthly(self, user_id: int) -> bool:
+        if user_id in self._monthly_winners:
+            self._monthly_winners.remove(user_id)
             self.save()
             return True
         return False
@@ -92,24 +103,29 @@ class WinnersStore:
     def all(self):
         return sorted(self._winners)
 
+    # Monthly winners methods
+    def add_monthly(self, user_id: int):
+        if user_id not in self._monthly_winners:
+            self._monthly_winners.add(user_id)
+            self.save()
+
+    def monthly_contains(self, user_id: int) -> bool:
+        return user_id in self._monthly_winners
+
+    def monthly_all(self):
+        return sorted(self._monthly_winners)
+
 winners_store = WinnersStore(Path(__file__).with_name("winners.json"))
 
 # === Monthly persistence (weekly winners + monthly contest state) ===
 class MonthlyStore:
-    """
-    Stores:
-      - weekly winners (photo + author) with a week_no counter
-      - active monthly contest (thread, timing, etc.)
-    Triggers a monthly contest every 4 'weeks' (weekly contests), including all winners
-    from those 4 weeks (ties included).
-    """
     def __init__(self, path: Path):
         self.path = path
         self.data = {
-            "weekly": [],                # list of {author_id, author_mention, image_url, votes, week_no, created_at}
-            "week_no": 0,               # incremented each weekly result closure
-            "last_monthly_week_no": 0,  # last week_no that was consumed by a monthly
-            "active": None              # {thread_id, thread_jump_url, opened_at, ends_at, closed}
+            "weekly": [],
+            "week_no": 0,
+            "last_monthly_week_no": 0,
+            "active": None
         }
         self._load()
 
@@ -121,7 +137,6 @@ class MonthlyStore:
             else:
                 self.save()
         except Exception:
-            # reset on corrupt file
             self.data = {
                 "weekly": [],
                 "week_no": 0,
@@ -138,7 +153,6 @@ class MonthlyStore:
         except Exception:
             pass
 
-    # Weekly lifecycle
     def begin_new_week(self):
         self.data["week_no"] = int(self.data.get("week_no", 0)) + 1
         self.save()
@@ -156,24 +170,17 @@ class MonthlyStore:
         self.save()
 
     def months_due(self) -> bool:
-        # Trigger monthly when 4 new weeks have been completed since the last monthly
         return (int(self.data.get("week_no", 0)) - int(self.data.get("last_monthly_week_no", 0))) >= 4
 
     def get_last_4_weeks_entries(self):
-        """
-        Returns all winners from the last 4 weeks since last_monthly_week_no.
-        Includes ties (could be >4 photos).
-        """
         last_done = int(self.data.get("last_monthly_week_no", 0))
         target_weeks = {last_done + 1, last_done + 2, last_done + 3, last_done + 4}
         return [e for e in self.data.get("weekly", []) if int(e.get("week_no", 0)) in target_weeks]
 
     def mark_monthly_consumed(self):
-        # Move marker up to 4 weeks after opening a monthly contest
         self.data["last_monthly_week_no"] = int(self.data.get("last_monthly_week_no", 0)) + 4
         self.save()
 
-    # Active monthly lifecycle
     def set_active(self, thread_id: int, thread_jump_url: str, opened_at_iso: str, ends_at_iso: str):
         self.data["active"] = {
             "thread_id": thread_id,
@@ -201,7 +208,6 @@ class MonthlyStore:
         if not active:
             return None
         try:
-            # ends_at is stored with timezone; fromisoformat preserves it
             return datetime.fromisoformat(active["ends_at"])
         except Exception:
             return None
@@ -375,8 +381,26 @@ async def close_monthly_contest_auto():
         print("close_monthly_contest_auto: no votes found")
         return
 
-    max_votes = max(e["votes"] for e in entries)
-    winners = [e for e in entries if e["votes"] == max_votes]
+    # Exclude past monthly winners from eligibility
+    eligible = [e for e in entries if not winners_store.monthly_contains(e["author_id"])]
+
+    if not eligible:
+        await results_channel.send("⚠️ Aucun gagnant mensuel éligible (tous ont déjà gagné auparavant).")
+        try:
+            await results_channel.send(f"📁 Fil du concours mensuel : {thread.jump_url}")
+        except Exception:
+            pass
+        try:
+            await thread.edit(archived=False, locked=True)
+        except Exception:
+            pass
+        monthly_store.set_active_closed()
+        monthly_store.clear_active()
+        print("close_monthly_contest_auto: no eligible monthly winners")
+        return
+
+    max_votes = max(e["votes"] for e in eligible)
+    winners = [e for e in eligible if e["votes"] == max_votes]
 
     if len(winners) == 1:
         w = winners[0]
@@ -389,6 +413,10 @@ async def close_monthly_contest_auto():
         await results_channel.send(result)
         for e in winners:
             await results_channel.send(embed=discord.Embed().set_image(url=e["image_url"]))
+
+    # Persist monthly winners so they can't win again
+    for e in winners:
+        winners_store.add_monthly(e["author_id"])
 
     try:
         await results_channel.send(f"📁 Fil du concours mensuel : {thread.jump_url}")
@@ -412,7 +440,6 @@ intents.guilds = True
 intents.messages = True
 intents.reactions = True
 bot = commands.Bot(command_prefix="/", intents=intents)
-
 
 # Helpers (non-interactive versions)
 async def send_partage_message_auto():
@@ -440,7 +467,6 @@ Bonne chance à toutes et à tous, et amusez-vous bien 🎉"""
         print("Automated: partage message sent")
     except Exception as e:
         print("send_partage_message_auto error:", e)
-
 
 async def create_vote_thread_from_photos_auto():
     global last_photo_call, user_submissions
@@ -497,7 +523,6 @@ Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
     last_photo_call = None
     return thread
 
-
 async def close_votes_and_announce_auto():
     results_channel = bot.get_channel(PHOTO_RESULT_CHANNEL_ID)
     if results_channel is None:
@@ -518,12 +543,10 @@ async def close_votes_and_announce_auto():
         print("close_votes_and_announce_auto: no active voting thread found")
         return
 
-    # Collect entries from the voting thread
     entries = []
     async for message in voting_thread.history(limit=None):
         if message.embeds and len(message.embeds) > 0:
             content = (message.content or "").strip()
-            # Expecting: "Photo de <@1234567890>:"
             author_mention = None
             author_id = None
             if content.startswith("Photo de "):
@@ -538,12 +561,11 @@ async def close_votes_and_announce_auto():
             except Exception:
                 img_url = None
 
-            # Count votes (prefer VOTE_EMOJI, fallback to ✅)
             votes = 0
             found_vote_reaction = False
             for reaction in message.reactions:
                 if str(reaction.emoji) == VOTE_EMOJI:
-                    votes = max(0, reaction.count - 1)  # minus bot reaction
+                    votes = max(0, reaction.count - 1)
                     found_vote_reaction = True
                     break
             if not found_vote_reaction:
@@ -566,7 +588,6 @@ async def close_votes_and_announce_auto():
         print("close_votes_and_announce_auto: no votes found")
         return
 
-    # Exclude past winners from eligibility
     eligible = [e for e in entries if not winners_store.contains(e["author_id"])]
 
     if not eligible:
@@ -597,15 +618,11 @@ async def close_votes_and_announce_auto():
         for e in winners:
             await results_channel.send(embed=discord.Embed().set_image(url=e["image_url"]))
 
-    # Persist the winners so they can't win again
     for e in winners:
         winners_store.add(e["author_id"])
 
-    # === Record weekly winners for monthly feature ===
     try:
-        # Increment the 'week' counter once per weekly contest
         monthly_store.begin_new_week()
-        # Store all weekly winners (ties possible) with their photo for the monthly contest
         for e in winners:
             monthly_store.add_weekly_winner(
                 author_id=e["author_id"],
@@ -615,9 +632,7 @@ async def close_votes_and_announce_auto():
             )
     except Exception as ex:
         print("Recording weekly winners failed:", ex)
-    # =================================================
 
-    # post thread link so users can open it easily, then lock but do NOT archive
     try:
         await results_channel.send(f"📁 Fil des votes : {voting_thread.jump_url}")
     except Exception:
@@ -631,20 +646,16 @@ async def close_votes_and_announce_auto():
 
     print("close_votes_and_announce_auto: done")
 
-    # === Maybe open a monthly contest now (after 4 weeks) ===
     try:
         await maybe_open_monthly_contest()
     except Exception as ex:
         print("maybe_open_monthly_contest error:", ex)
-    # ========================================================
 
-# Manual commands (reuse helpers where appropriate)
 @bot.tree.command(name="partage-photo", description="Ping les reporters pour partager leur photos")
 async def share_photo(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     await send_partage_message_auto()
     await interaction.followup.send("Message envoyé dans le canal photo!", ephemeral=True)
-
 
 @bot.tree.command(name="ouverture-des-votes", description="Ouvre la phase des votes")
 async def open_votes(interaction: discord.Interaction):
@@ -657,7 +668,6 @@ async def open_votes(interaction: discord.Interaction):
 
     thread = await create_vote_thread_from_photos_auto()
     if thread is None:
-        # create thread manually to keep interface consistent
         photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
         thread = await photo_channel.create_thread(
             name=f"📊 Votes - {datetime.now(tz).strftime('%d/%m/%Y')}",
@@ -668,7 +678,6 @@ async def open_votes(interaction: discord.Interaction):
         return
 
     await interaction.followup.send("Phase de votes ouverte !", ephemeral=True)
-
 
 @bot.tree.command(name="fermeture-des-votes", description="Ferme les votes et annonce les résultats")
 async def close_votes(interaction: discord.Interaction):
@@ -685,30 +694,39 @@ async def close_monthly(interaction: discord.Interaction):
         return
     await close_monthly_contest_auto()
     await interaction.followup.send("✅ Concours mensuel clôturé et résultats annoncés !", ephemeral=True)
-    
-# Admin command to remove a user from past winners
-@bot.tree.command(name="winners-remove", description="Retire un utilisateur de la liste des gagnants passés (réautorise à gagner)")
-@app_commands.describe(user="Utilisateur à réautoriser pour de futurs concours")
-async def winners_remove(interaction: discord.Interaction, user: discord.User):
+
+@bot.tree.command(name="winners-remove-weekly", description="Retire un utilisateur de la liste des gagnants hebdomadaires (réautorise à gagner la semaine)")
+@app_commands.describe(user="Utilisateur à réautoriser pour les concours hebdomadaires")
+async def winners_remove_weekly(interaction: discord.Interaction, user: discord.User):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ Autorisation refusée. Administrateur requis.", ephemeral=True)
         return
 
-    removed = winners_store.remove(user.id)
+    removed = winners_store.remove_weekly(user.id)
     if removed:
-        await interaction.response.send_message(f"✅ {user.mention} a été retiré de la liste des gagnants passés.", ephemeral=True)
+        await interaction.response.send_message(f"✅ {user.mention} a été retiré de la liste des gagnants hebdomadaires.", ephemeral=True)
     else:
-        await interaction.response.send_message(f"ℹ️ {user.mention} n'était pas dans la liste des gagnants.", ephemeral=True)
+        await interaction.response.send_message(f"ℹ️ {user.mention} n'était pas dans la liste des gagnants hebdomadaires.", ephemeral=True)
 
+@bot.tree.command(name="winners-remove-monthly", description="Retire un utilisateur de la liste des gagnants mensuels (réautorise à gagner le mensuel)")
+@app_commands.describe(user="Utilisateur à réautoriser pour les concours mensuels")
+async def winners_remove_monthly(interaction: discord.Interaction, user: discord.User):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Autorisation refusée. Administrateur requis.", ephemeral=True)
+        return
 
-# Scheduler utilities
+    removed = winners_store.remove_monthly(user.id)
+    if removed:
+        await interaction.response.send_message(f"✅ {user.mention} a été retiré de la liste des gagnants mensuels.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"ℹ️ {user.mention} n'était pas dans la liste des gagnants mensuels.", ephemeral=True)
+
 def next_weekday_dt(now, target_weekday, hour, minute):
     days_ahead = (target_weekday - now.weekday()) % 7
     candidate = (now + timedelta(days=days_ahead)).replace(hour=hour, minute=minute, second=0, microsecond=0)
     if candidate <= now:
         candidate = candidate + timedelta(days=7)
     return candidate
-
 
 async def scheduler_loop():
     await bot.wait_until_ready()
@@ -740,7 +758,6 @@ async def scheduler_loop():
 
         await asyncio.sleep(1)
 
-
 async def run_quick_test():
     await bot.wait_until_ready()
     await asyncio.sleep(1)
@@ -752,10 +769,7 @@ async def run_quick_test():
     await close_votes_and_announce_auto()
     print("TEST_MODE quick sequence finished")
 
-
-# Hook scheduler on startup
 _original_on_ready = getattr(bot, "on_ready", None)
-
 
 @bot.event
 async def on_ready():
@@ -776,7 +790,6 @@ async def on_ready():
     else:
         bot.loop.create_task(scheduler_loop())
 
-    # Resume monthly closing timer if there is an active monthly contest
     try:
         active = monthly_store.get_active()
         if active and not active.get("closed"):
@@ -784,8 +797,6 @@ async def on_ready():
     except Exception as ex:
         print("on_ready schedule_monthly_close error:", ex)
 
-
-# Message handlers (keep existing behavior)
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -835,7 +846,6 @@ async def on_message(message):
             return
 
         user_submissions[user_id] += 1
-
 
 @bot.event
 async def on_message_delete(message):
