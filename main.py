@@ -21,22 +21,22 @@ VOTE_EMOJI = os.getenv("VOTE_EMOJI", "🗳️")
 
 # === Monthly contest settings ===
 MONTHLY_ENABLED = os.getenv("MONTHLY_ENABLED", "1") == "1"
-MONTHLY_VOTE_DURATION_MIN = int(os.getenv("MONTHLY_VOTE_DURATION_MIN", "2880"))
+MONTHLY_VOTE_DURATION_MIN = int(os.getenv("MONTHLY_VOTE_DURATION_MIN", "1380"))
 MONTHLY_VOTE_EMOJI = os.getenv("MONTHLY_VOTE_EMOJI", VOTE_EMOJI)
 # ================================
 
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Paris")
-SHARE_WEEKDAY = int(os.getenv("SHARE_WEEKDAY", "6"))
-SHARE_HOUR = int(os.getenv("SHARE_HOUR", "21"))
-SHARE_MIN = int(os.getenv("SHARE_MIN", "39"))
+SHARE_WEEKDAY = int(os.getenv("SHARE_WEEKDAY", "0"))
+SHARE_HOUR = int(os.getenv("SHARE_HOUR", "18"))
+SHARE_MIN = int(os.getenv("SHARE_MIN", "00"))
 
-OPEN_WEEKDAY = int(os.getenv("OPEN_WEEKDAY", "6"))
-OPEN_HOUR = int(os.getenv("OPEN_HOUR", "21"))
-OPEN_MIN = int(os.getenv("OPEN_MIN", "40"))
+OPEN_WEEKDAY = int(os.getenv("OPEN_WEEKDAY", "5"))
+OPEN_HOUR = int(os.getenv("OPEN_HOUR", "8"))
+OPEN_MIN = int(os.getenv("OPEN_MIN", "0"))
 
 RESULT_WEEKDAY = int(os.getenv("RESULT_WEEKDAY", "6"))
-RESULT_HOUR = int(os.getenv("RESULT_HOUR", "21"))
-RESULT_MIN = int(os.getenv("RESULT_MIN", "41"))
+RESULT_HOUR = int(os.getenv("RESULT_HOUR", "18"))
+RESULT_MIN = int(os.getenv("RESULT_MIN", "00"))
 
 TEST_MODE = os.getenv("TEST_MODE", "0") == "1"
 TEST_WAIT_SEC = int(os.getenv("TEST_WAIT_SEC", "10"))
@@ -404,12 +404,16 @@ async def close_monthly_contest_auto():
 
     if len(winners) == 1:
         w = winners[0]
-        result = f"🏅 **Gagnant(e) du Concours Mensuel : {w['author_mention']} avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :"
+        result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
+        
+🏅 **Gagnant(e) du Concours Mensuel : {w['author_mention']} avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :"""
         await results_channel.send(result)
         await results_channel.send(embed=discord.Embed().set_image(url=w["image_url"]))
     else:
         authors = ", ".join(e["author_mention"] for e in winners)
-        result = f"🏅 **Égalité au Concours Mensuel avec {max_votes} votes chacun !**\n\nFélicitations à {authors} !\n\nVoici les photos gagnantes :"
+        result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
+        
+🏅 **Égalité au Concours Mensuel avec {max_votes} votes chacun !**\n\nFélicitations à {authors} !\n\nVoici les photos gagnantes :"""
         await results_channel.send(result)
         for e in winners:
             await results_channel.send(embed=discord.Embed().set_image(url=e["image_url"]))
@@ -608,12 +612,16 @@ async def close_votes_and_announce_auto():
 
     if len(winners) == 1:
         w = winners[0]
-        result = f"🏆 **Le gagnant de la semaine est {w['author_mention']} avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :"
+        result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
+        
+🏆 **Le gagnant de la semaine est {w['author_mention']} avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :"""
         await results_channel.send(result)
         await results_channel.send(embed=discord.Embed().set_image(url=w["image_url"]))
     else:
         authors = ", ".join(e["author_mention"] for e in winners)
-        result = f"🏆 **Égalité avec {max_votes} votes chacun !**\n\nFélicitations à {authors} !\n\nVoici les photos gagnantes :"
+        result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
+        
+🏆 **Égalité avec {max_votes} votes chacun !**\n\nFélicitations à {authors} !\n\nVoici les photos gagnantes :"""
         await results_channel.send(result)
         for e in winners:
             await results_channel.send(embed=discord.Embed().set_image(url=e["image_url"]))
@@ -811,7 +819,7 @@ async def on_message(message):
             try:
                 await message.author.send(
                     "❌ Les messages texte ne sont **pas autorisés** dans le canal photo.\n"
-                    "Merci de ne poster que **des photos**."
+                    "🙏 Merci de ne poster que **des photos**."
                 )
             except Exception:
                 pass
@@ -825,7 +833,7 @@ async def on_message(message):
             try:
                 await message.author.send(
                     "❌ Vous ne pouvez poster qu'**une seule photo** par semaine.\n"
-                    "Merci de ne partager qu'une seule image à la fois."
+                    "🙏 Merci de ne partager qu'une seule image à la fois."
                 )
             except Exception:
                 pass
@@ -839,7 +847,7 @@ async def on_message(message):
             try:
                 await message.author.send(
                     "❌ Vous avez déjà partagé une photo cette semaine.\n"
-                    "Merci d'attendre la semaine prochaine pour en partager une nouvelle."
+                    "🙏 Merci d'attendre la semaine prochaine pour en partager une nouvelle."
                 )
             except Exception:
                 pass
