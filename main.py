@@ -169,6 +169,27 @@ Bonne chance à toutes et à tous, et amusez-vous bien 🎉"""
             "Message envoyé dans le canal photo!", 
             ephemeral=True
         )
+@bot.tree.command(name="remove-weekly-winner", description="Retire un membre de la liste des gagnants hebdomadaires")
+@app_commands.describe(user="Sélectionnez le membre à retirer des gagnants")
+async def remove_weekly_winner(interaction: discord.Interaction, user: discord.Member):
+    user_id = user.id
+    json_path = os.path.join(os.path.dirname(__file__), "weekly-winner.json")
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        await interaction.response.send_message("Impossible de lire le fichier weekly-winner.json.", ephemeral=True)
+        return
+    original_len = len(data)
+    # Remove any entry where user_id is in winner_ids
+    data = [entry for entry in data if user_id not in entry.get("winner_ids", [])]
+    removed = len(data) < original_len
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    if removed:
+        await interaction.response.send_message(f"L'objet contenant '{user.display_name}' a été supprimé de la liste des gagnants hebdomadaires.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"Aucun objet trouvé pour '{user.display_name}' dans la liste des gagnants.", ephemeral=True)
 
 @bot.tree.command(name="ouverture-des-votes", description="Ouvre la phase des votes")
 async def open_votes(interaction: discord.Interaction):
