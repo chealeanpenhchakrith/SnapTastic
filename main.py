@@ -23,8 +23,67 @@ last_photo_call = None # Track when /partage-photo was last run
 intents = discord.Intents.default()
 intents.message_content = True # Allow to read messages
 intents.guilds = True
+intents.reactions = True
+intents.members = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
+
+
+
+# --- Track user votes per voting thread ---
+user_votes_per_thread = defaultdict(dict)  # {thread_id: {user_id: message_id}}
+# Restrict users to one vote per voting thread
+@bot.event
+async def on_reaction_add(reaction, user):
+    # Ignore bot's own reactions
+    if user == bot.user:
+        return
+    # Only process vote emoji in threads named "📊 Votes"
+    message = reaction.message
+    thread = message.channel
+    if not isinstance(thread, discord.Thread):
+        return
+    if not thread.name.startswith("📊 Votes"):
+        return
+    if str(reaction.emoji) != VOTE_EMOJI:
+        return
+    # Track votes per user per thread
+    thread_id = thread.id
+    user_id = user.id
+    # If user already voted for another message, remove this reaction
+    voted_msg_id = user_votes_per_thread[thread_id].get(user_id)
+    if voted_msg_id is not None and voted_msg_id != message.id:
+        await reaction.remove(user)
+        try:
+            await user.send("❌ Vous ne pouvez voter que pour une seule photo !")
+        except Exception:
+            pass
+        return
+    # If this is user's first vote, record it
+    user_votes_per_thread[thread_id][user_id] = message.id
+
+
+# Allow users to change their vote by handling reaction removal
+@bot.event
+async def on_reaction_remove(reaction, user):
+    # Ignore bot's own reactions
+    if user == bot.user:
+        return
+    message = reaction.message
+    thread = message.channel
+    if not isinstance(thread, discord.Thread):
+        return
+    if not thread.name.startswith("📊 Votes"):
+        return
+    if str(reaction.emoji) != VOTE_EMOJI:
+        return
+    thread_id = thread.id
+    user_id = user.id
+    # If user unvoted their tracked message, remove their vote record
+    if user_votes_per_thread[thread_id].get(user_id) == message.id:
+        del user_votes_per_thread[thread_id][user_id]
+        
+        
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
