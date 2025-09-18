@@ -372,13 +372,12 @@ Voici les photos gagnantes :"""
         # Wait for content to be processed
         await asyncio.sleep(3)
 
-    # Do not archive or lock the thread; keep it visible for users
-
+        # Do not archive or lock the thread; keep it visible for users
+        await results_channel.send(f"🔗 **Voir le fil des votes ici :** <#{voting_thread.id}>")
         await interaction.followup.send(
             "✅ Votes terminés et résultats annoncés !",
             ephemeral=True
         )
-
     except Exception as e:
         print(f"Error in close_votes: {e}")
         await interaction.followup.send(
