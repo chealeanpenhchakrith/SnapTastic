@@ -374,6 +374,40 @@ Voici les photos gagnantes :"""
 
         # Do not archive or lock the thread; keep it visible for users
         await results_channel.send(f"🔗 **Voir le fil des votes ici :** <#{voting_thread.id}>")
+
+        # --- Monthly contest logic ---
+        if len(previous_data) % 4 == 0 and len(previous_data) > 0:
+            last_4 = previous_data[-4:]
+            month_year = datetime.now().strftime('%B %Y')
+            monthly_thread = await results_channel.create_thread(
+                name=f"📅 Monthly Contest - {month_year}",
+                auto_archive_duration=1440
+            )
+            await monthly_thread.send(f"**Concours mensuel !** Les 4 photos gagnantes des dernières semaines sont en compétition. Votez pour votre préférée avec {VOTE_EMOJI} !")
+            # Post each winning photo
+            for entry in last_4:
+                for winner_id in entry.get("winner_ids", []):
+                    # Find the original photo URL from the weekly voting thread
+                    found = False
+                    for thread in active_threads:
+                        if thread.parent_id == PHOTO_CHANNEL_ID and thread.name.startswith("📊 Votes"):
+                            async for msg in thread.history(limit=None):
+                                if msg.embeds and len(msg.embeds) > 0:
+                                    mention = msg.content.split("Photo de ")[1].rstrip(":") if "Photo de " in msg.content else ""
+                                    if mention.startswith("<@") and mention.endswith(">"):
+                                        uid = int(mention.replace("<@","").replace(">","").strip())
+                                        if uid == winner_id:
+                                            monthly_msg = await monthly_thread.send(
+                                                content=f"Photo gagnante de <@{winner_id}>:",
+                                                embed=discord.Embed().set_image(url=msg.embeds[0].image.url)
+                                            )
+                                            await monthly_msg.add_reaction(VOTE_EMOJI)
+                                            found = True
+                                            break
+                            if found:
+                                break
+            await monthly_thread.send("Les votes sont ouverts jusqu'à la fin du mois ! 🗳️")
+
         await interaction.followup.send(
             "✅ Votes terminés et résultats annoncés !",
             ephemeral=True
