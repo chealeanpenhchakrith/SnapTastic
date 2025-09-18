@@ -372,8 +372,7 @@ Voici les photos gagnantes :"""
         # Wait for content to be processed
         await asyncio.sleep(3)
 
-        # Archive thread after ensuring content is sent
-        await voting_thread.edit(archived=True, locked=True)
+    # Do not archive or lock the thread; keep it visible for users
 
         await interaction.followup.send(
             "✅ Votes terminés et résultats annoncés !",
