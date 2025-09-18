@@ -226,6 +226,8 @@ Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
     
     await interaction.response.send_message("Phase de votes ouverte !", ephemeral=True)
 
+import json
+
 @bot.tree.command(name="fermeture-des-votes", description="Ferme les votes et annonce les résultats")
 async def close_votes(interaction: discord.Interaction):
     try:
@@ -281,7 +283,7 @@ async def close_votes(interaction: discord.Interaction):
         max_votes = max(data['votes'] for data in vote_counts.values())
         winners = [(msg, data) for msg, data in vote_counts.items() 
                   if data['votes'] == max_votes]
-        
+
         # Format results message
         if len(winners) == 1:
             _, winner_data = winners[0]
@@ -295,26 +297,53 @@ Félicitations ! Voici la photo gagnante :"""
 Félicitations à {authors} !
 
 Voici les photos gagnantes :"""
-        
+
         # Send results
         await results_channel.send(result)
-        
+
         # Send winning photos using cached URLs
         for _, data in winners:
             embed = discord.Embed().set_image(url=data['image_url'])
             await results_channel.send(embed=embed)
-        
+
+        # Store winner user IDs in weekly-winner.json
+        winner_ids = []
+        for msg, _ in winners:
+            # Try to extract user ID from mention string
+            try:
+                mention = msg.content.split("Photo de ")[1].rstrip(":")
+                if mention.startswith("<@") and mention.endswith(">"):
+                    user_id = int(mention.replace("<@","").replace(">",""))
+                    winner_ids.append(user_id)
+            except Exception:
+                pass
+
+        # Prepare entry
+        week_entry = {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "winner_ids": winner_ids
+        }
+        json_path = os.path.join(os.path.dirname(__file__), "weekly-winner.json")
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = []
+        data.append(week_entry)
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
         # Wait for content to be processed
         await asyncio.sleep(3)
-        
+
         # Archive thread after ensuring content is sent
         await voting_thread.edit(archived=True, locked=True)
-        
+
         await interaction.followup.send(
             "✅ Votes terminés et résultats annoncés !",
             ephemeral=True
         )
-        
+
     except Exception as e:
         print(f"Error in close_votes: {e}")
         await interaction.followup.send(
