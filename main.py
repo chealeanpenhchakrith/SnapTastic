@@ -279,19 +279,51 @@ async def close_votes(interaction: discord.Interaction):
             await interaction.followup.send("❌ Aucun vote n'a été trouvé.", ephemeral=True)
             return
         
-        # Find winner(s)
+        # Load previous winner IDs
+        json_path = os.path.join(os.path.dirname(__file__), "weekly-winner.json")
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                previous_data = json.load(f)
+        except Exception:
+            previous_data = []
+        previous_winner_ids = set()
+        for entry in previous_data:
+            previous_winner_ids.update(entry.get("winner_ids", []))
+
+        # Find winner(s) excluding previous winners
         max_votes = max(data['votes'] for data in vote_counts.values())
-        winners = [(msg, data) for msg, data in vote_counts.items() 
-                  if data['votes'] == max_votes]
+        eligible_winners = []
+        for msg, data in vote_counts.items():
+            # Extract user ID from mention string
+            try:
+                mention = msg.content.split("Photo de ")[1].rstrip(":")
+                if mention.startswith("<@") and mention.endswith(">"):
+                    user_id = int(mention.replace("<@","").replace(">","").strip())
+                    if data['votes'] == max_votes and user_id not in previous_winner_ids:
+                        eligible_winners.append((msg, data, user_id))
+            except Exception:
+                pass
 
         # Format results message
-        if len(winners) == 1:
-            _, winner_data = winners[0]
-            result = f"""🏆 **Le gagnant de la semaine est {winner_data['author']} avec {max_votes} votes !**
+        if not eligible_winners:
+            result = "❌ Aucun gagnant éligible cette semaine (tous les top-votés ont déjà gagné auparavant)."
+            await results_channel.send(result)
+            await interaction.followup.send(
+                "Votes terminés, mais aucun nouveau gagnant possible !",
+                ephemeral=True
+            )
+            # Archive thread
+            await asyncio.sleep(3)
+            await voting_thread.edit(archived=True, locked=True)
+            return
+
+        if len(eligible_winners) == 1:
+            _, winner_data, winner_id = eligible_winners[0]
+            result = f"""🏆 **Le gagnant de la semaine est <@{winner_id}> avec {max_votes} votes !**
 
 Félicitations ! Voici la photo gagnante :"""
         else:
-            authors = ", ".join(data['author'] for _, data in winners)
+            authors = ", ".join(f"<@{winner_id}>" for _, _, winner_id in eligible_winners)
             result = f"""🏆 **Nous avons une égalité avec {max_votes} votes chacun !**
             
 Félicitations à {authors} !
@@ -302,36 +334,19 @@ Voici les photos gagnantes :"""
         await results_channel.send(result)
 
         # Send winning photos using cached URLs
-        for _, data in winners:
+        for msg, data, _ in eligible_winners:
             embed = discord.Embed().set_image(url=data['image_url'])
             await results_channel.send(embed=embed)
 
         # Store winner user IDs in weekly-winner.json
-        winner_ids = []
-        for msg, _ in winners:
-            # Try to extract user ID from mention string
-            try:
-                mention = msg.content.split("Photo de ")[1].rstrip(":")
-                if mention.startswith("<@") and mention.endswith(">"):
-                    user_id = int(mention.replace("<@","").replace(">",""))
-                    winner_ids.append(user_id)
-            except Exception:
-                pass
-
-        # Prepare entry
+        winner_ids = [winner_id for _, _, winner_id in eligible_winners]
         week_entry = {
             "date": datetime.now().strftime("%Y-%m-%d"),
             "winner_ids": winner_ids
         }
-        json_path = os.path.join(os.path.dirname(__file__), "weekly-winner.json")
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            data = []
-        data.append(week_entry)
+        previous_data.append(week_entry)
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(previous_data, f, ensure_ascii=False, indent=2)
 
         # Wait for content to be processed
         await asyncio.sleep(3)
