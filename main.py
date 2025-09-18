@@ -23,7 +23,8 @@ last_photo_call = None # Track when /partage-photo was last run
 intents = discord.Intents.default()
 intents.message_content = True # Allow to read messages
 intents.guilds = True
-intents.reactions = True
+
+# Command to close monthly contest and announce winner
 intents.members = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
@@ -418,5 +419,67 @@ Voici les photos gagnantes :"""
             "❌ Une erreur s'est produite lors de la fermeture des votes.",
             ephemeral=True
         )
-# Run bot using the token fron .env
+
+# Command to close monthly contest and announce winner
+@bot.tree.command(name="fermeture-du-vote-mensuel", description="Compte les votes et annonce le gagnant du concours mensuel")
+async def close_monthly_vote(interaction: discord.Interaction):
+    try:
+        await interaction.response.defer(ephemeral=True)
+        results_channel = bot.get_channel(PHOTO_RESULT_CHANNEL_ID)
+        guild = interaction.guild
+        # Find monthly contest thread
+        active_threads = await guild.active_threads()
+        monthly_thread = None
+        month_year = datetime.now().strftime('%B %Y')
+        for thread in active_threads:
+            if thread.parent_id == PHOTO_RESULT_CHANNEL_ID and thread.name.startswith("📅 Monthly Contest") and month_year in thread.name:
+                monthly_thread = thread
+                break
+        if not monthly_thread:
+            await interaction.followup.send("❌ Aucun fil de concours mensuel actif trouvé.", ephemeral=True)
+            return
+        # Collect votes for each photo
+        vote_counts = {}
+        photo_authors = {}
+        import re
+        user_mention_pattern = re.compile(r'<@([0-9]+)>')
+        async for message in monthly_thread.history(limit=None):
+            if message.embeds and len(message.embeds) > 0:
+                # Extract user mention from message content using regex
+                mention = message.content.split("Photo gagnante de ")[1].rstrip(":") if "Photo gagnante de " in message.content else ""
+                match = user_mention_pattern.match(mention)
+                if match:
+                    user_id = int(match.group(1))
+                    photo_authors[message.id] = user_id
+                for reaction in message.reactions:
+                    if str(reaction.emoji) == VOTE_EMOJI:
+                        vote_counts[message] = {
+                            'votes': reaction.count - 1,
+                            'author_id': photo_authors.get(message.id),
+                            'image_url': message.embeds[0].image.url
+                        }
+                        break
+        if not vote_counts:
+            await interaction.followup.send("❌ Aucun vote n'a été trouvé.", ephemeral=True)
+            return
+        # Find winner(s)
+        max_votes = max(data['votes'] for data in vote_counts.values())
+        winners = [(msg, data) for msg, data in vote_counts.items() if data['votes'] == max_votes]
+        # Format result message
+        if len(winners) == 1:
+            winner_data = winners[0][1]
+            winner_id = winner_data['author_id']
+            result = f"🏆 **Le gagnant du concours mensuel est <@{winner_id}> avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :"
+        else:
+            authors = ", ".join(f"<@{data['author_id']}>" for _, data in winners)
+            result = f"🏆 **Égalité ! Les gagnants du mois sont {authors} avec {max_votes} votes chacun !**\n\nVoici les photos gagnantes :"
+        await results_channel.send(result)
+        for _, data in winners:
+            embed = discord.Embed().set_image(url=data['image_url'])
+            await results_channel.send(embed=embed)
+        await interaction.followup.send("✅ Votes mensuels terminés et résultats annoncés !", ephemeral=True)
+    except Exception as e:
+        print(f"Error in close_monthly_vote: {e}")
+        await interaction.followup.send("❌ Une erreur s'est produite lors de la fermeture du vote mensuel.", ephemeral=True)
+
 bot.run(TOKEN)
