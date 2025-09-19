@@ -26,10 +26,8 @@ intents.guilds = True
 
 # Command to close monthly contest and announce winner
 intents.members = True
+
 bot = commands.Bot(command_prefix="/", intents=intents)
-
-
-
 
 # --- Track user votes per voting thread ---
 user_votes_per_thread = defaultdict(dict)  # {thread_id: {user_id: message_id}}
@@ -304,6 +302,28 @@ Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
     await interaction.response.send_message("Phase de votes ouverte !", ephemeral=True)
 
 import json
+
+@bot.tree.command(name="remove-monthly-winner", description="Retire un membre de la liste des gagnants mensuels")
+@app_commands.describe(user="Sélectionnez le membre à retirer des gagnants mensuels")
+async def remove_monthly_winner(interaction: discord.Interaction, user: discord.Member):
+    user_id = user.id
+    json_path = os.path.join(os.path.dirname(__file__), "monthly-winner.json")
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        await interaction.response.send_message("Impossible de lire le fichier monthly-winner.json.", ephemeral=True)
+        return
+    original_len = len(data)
+    # Remove any entry where user_id is in winner_ids
+    data = [entry for entry in data if user_id not in entry.get("winner_ids", [])]
+    removed = len(data) < original_len
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    if removed:
+        await interaction.response.send_message(f"L'objet contenant '{user.display_name}' a été supprimé de la liste des gagnants mensuels.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"Aucun objet trouvé pour '{user.display_name}' dans la liste des gagnants mensuels.", ephemeral=True)
 
 @bot.tree.command(name="fermeture-des-votes", description="Ferme les votes et annonce les résultats")
 async def close_votes(interaction: discord.Interaction):
