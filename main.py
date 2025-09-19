@@ -529,11 +529,9 @@ async def close_monthly_vote(interaction: discord.Interaction):
             return
         # Find winner(s)
         max_votes = max(data['votes'] for data in vote_counts.values())
-        winners = [(msg, data) for msg, data in vote_counts.items() if data['votes'] == max_votes]
-        # Format result message
-        thread_link = monthly_thread.jump_url if monthly_thread else ""
-        winner_ids = [data['author_id'] for _, data in winners]
-        # Store winners in monthly-winner.json
+        top_voted = [(msg, data) for msg, data in vote_counts.items() if data['votes'] == max_votes]
+
+        # Load previous monthly winners
         import json
         json_path = os.path.join(os.path.dirname(__file__), "monthly-winner.json")
         try:
@@ -541,6 +539,23 @@ async def close_monthly_vote(interaction: discord.Interaction):
                 monthly_data = json.load(f)
         except Exception:
             monthly_data = []
+        previous_monthly_winner_ids = set()
+        for entry in monthly_data:
+            previous_monthly_winner_ids.update(entry.get("winner_ids", []))
+
+        # Filter out previous monthly winners
+        eligible_winners = [(msg, data) for msg, data in top_voted if data['author_id'] not in previous_monthly_winner_ids]
+
+        thread_link = monthly_thread.jump_url if monthly_thread else ""
+
+        if not eligible_winners:
+            result = f"❌ Aucun gagnant éligible ce mois-ci (tous les top-votés ont déjà gagné auparavant)."
+            await results_channel.send(result)
+            await interaction.followup.send("Votes mensuels terminés, mais aucun nouveau gagnant possible !", ephemeral=True)
+            return
+
+        winner_ids = [data['author_id'] for _, data in eligible_winners]
+        # Store eligible winners in monthly-winner.json
         month_entry = {
             "date": datetime.now().strftime("%Y-%m-%d"),
             "winner_ids": winner_ids,
@@ -550,8 +565,8 @@ async def close_monthly_vote(interaction: discord.Interaction):
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(monthly_data, f, ensure_ascii=False, indent=2)
 
-        if len(winners) == 1:
-            winner_data = winners[0][1]
+        if len(eligible_winners) == 1:
+            winner_data = eligible_winners[0][1]
             winner_id = winner_data['author_id']
             result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 
@@ -559,14 +574,13 @@ async def close_monthly_vote(interaction: discord.Interaction):
 Lien vers le fil de vote : {thread_link}
 ⠀"""
         else:
-            authors = ", ".join(f"<@{data['author_id']}>" for _, data in winners)
+            authors = ", ".join(f"<@{data['author_id']}>" for _, data in eligible_winners)
             result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 🏆 **Égalité ! Les gagnants du mois sont {authors} avec {max_votes} votes chacun !**\n\nFélicitations ! Voici les photos gagnantes :
 Lien vers le fil de vote : {thread_link}
 ⠀"""
-            
         await results_channel.send(result)
-        for _, data in winners:
+        for _, data in eligible_winners:
             embed = discord.Embed().set_image(url=data['image_url'])
             await results_channel.send(embed=embed)
         await interaction.followup.send("✅ Votes mensuels terminés et résultats annoncés !", ephemeral=True)
