@@ -439,7 +439,17 @@ Voici les photos gagnantes :"""
                 name=f"📅 Monthly Contest - {month_year}",
                 auto_archive_duration=1440
             )
-            await monthly_thread.send(f"**Concours mensuel !** Les 4 photos gagnantes des dernières semaines sont en compétition. Votez pour votre préférée avec {VOTE_EMOJI} !")
+            
+            introMonth = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
+
+**🗳️ Concours mensuel !**
+
+Les 4 photos gagnantes des dernières semaines sont en compétition. Votez pour votre préférée avec {VOTE_EMOJI} !"
+
+**📸 __Voici les photos soumises :__**
+⠀"""
+
+            await monthly_thread.send(introMonth)
             # Post each winning photo
             for entry in last_4:
                 for winner_id in entry.get("winner_ids", []):
