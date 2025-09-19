@@ -531,13 +531,22 @@ async def close_monthly_vote(interaction: discord.Interaction):
         max_votes = max(data['votes'] for data in vote_counts.values())
         winners = [(msg, data) for msg, data in vote_counts.items() if data['votes'] == max_votes]
         # Format result message
+        thread_link = monthly_thread.jump_url if monthly_thread else ""
         if len(winners) == 1:
             winner_data = winners[0][1]
             winner_id = winner_data['author_id']
-            result = f"🏆 **Le gagnant du concours mensuel est <@{winner_id}> avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :"
+            result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
+
+🏆 **Le gagnant du concours mensuel est <@{winner_id}> avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :
+Lien vers le fil de vote : {thread_link}
+⠀"""
         else:
             authors = ", ".join(f"<@{data['author_id']}>" for _, data in winners)
-            result = f"🏆 **Égalité ! Les gagnants du mois sont {authors} avec {max_votes} votes chacun !**\n\nVoici les photos gagnantes :"
+            result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
+🏆 **Égalité ! Les gagnants du mois sont {authors} avec {max_votes} votes chacun !**\n\nFélicitations ! Voici les photos gagnantes :
+Lien vers le fil de vote : {thread_link}
+⠀"""
+            
         await results_channel.send(result)
         for _, data in winners:
             embed = discord.Embed().set_image(url=data['image_url'])
