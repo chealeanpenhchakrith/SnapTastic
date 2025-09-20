@@ -41,7 +41,7 @@ async def on_reaction_add(reaction, user):
     # Restrict users to one vote per monthly contest thread
     message = reaction.message
     thread = message.channel
-    if isinstance(thread, discord.Thread) and thread.name.startswith("📅 Monthly Contest"):
+    if isinstance(thread, discord.Thread) and thread.name.startswith("📅 Concours Photo Mensuel"):
         thread_id = thread.id
         user_id = user.id
         if str(reaction.emoji) == VOTE_EMOJI:
@@ -49,7 +49,7 @@ async def on_reaction_add(reaction, user):
             if voted_msg_id is not None and voted_msg_id != message.id:
                 await reaction.remove(user)
                 try:
-                    await user.send("❌ Vous ne pouvez voter que pour une seule photo dans le concours mensuel !")
+                    await user.send("🚫 Vous ne pouvez voter que pour une seule photo dans le concours mensuel ! 🚫")
                 except Exception:
                     pass
                 return
@@ -61,7 +61,7 @@ async def on_reaction_remove(reaction, user):
     # Allow users to change their vote in monthly contest
     message = reaction.message
     thread = message.channel
-    if isinstance(thread, discord.Thread) and thread.name.startswith("📅 Monthly Contest"):
+    if isinstance(thread, discord.Thread) and thread.name.startswith("📅 Concours Photo Mensuel"):
         thread_id = thread.id
         user_id = user.id
         if str(reaction.emoji) == VOTE_EMOJI:
@@ -88,13 +88,13 @@ async def on_reaction_add(reaction, user):
         if voted_msg_id is not None and voted_msg_id != message.id:
             await reaction.remove(user)
             try:
-                await user.send("❌ Vous ne pouvez voter que pour une seule photo !")
+                await user.send("🚫 Vous ne pouvez voter que pour une seule photo ! 🚫")
             except Exception:
                 pass
             return
         user_votes_per_thread[thread_id][user_id] = message.id
     # --- Monthly contest vote restriction ---
-    elif thread.name.startswith("📅 Monthly Contest"):
+    elif thread.name.startswith("📅 Concours Photo Mensuel"):
         if str(reaction.emoji) != VOTE_EMOJI:
             return
         thread_id = thread.id
@@ -103,7 +103,7 @@ async def on_reaction_add(reaction, user):
         if voted_msg_id is not None and voted_msg_id != message.id:
             await reaction.remove(user)
             try:
-                await user.send("❌ Vous ne pouvez voter que pour une seule photo dans le concours mensuel !")
+                await user.send("🚫 Vous ne pouvez voter que pour une seule photo dans le concours mensuel !🚫")
             except Exception:
                 pass
             return
@@ -129,7 +129,7 @@ async def on_reaction_remove(reaction, user):
         if user_votes_per_thread[thread_id].get(user_id) == message.id:
             del user_votes_per_thread[thread_id][user_id]
     # --- Monthly contest vote removal ---
-    elif thread.name.startswith("📅 Monthly Contest"):
+    elif thread.name.startswith("📅 Concours Photo Mensuel"):
         if str(reaction.emoji) != VOTE_EMOJI:
             return
         thread_id = thread.id
@@ -161,7 +161,7 @@ async def on_message(message):
         if len(message.attachments) == 0:
             await message.delete()
             await message.author.send(
-                "❌ Les messages texte ne sont **pas autorisés** dans le canal photo.\n"
+                "🚫 Les messages texte ne sont **pas autorisés** dans le canal photo 🚫\n"
                 "Merci de ne poster que **des photos**."
             )
             return
@@ -170,15 +170,15 @@ async def on_message(message):
         if len(message.attachments) > 1:
             await message.delete()
             await message.author.send(
-                "❌ Vous ne pouvez poster qu'**une seule photo** par semaine.\n"
+                "🚫 Vous ne pouvez poster qu'**une seule photo** par semaine 🚫\n"
                 "Merci de ne partager qu'une seule image à la fois."
             )
         
         if user_submissions[user_id] >= 1:
             await message.delete()
             await message.author.send(
-                "❌ Vous avez déjà partagé une photo cette semaine.\n"
-                "Merci d'attendre la semaine prochaine pour en partager une nouvelle."
+                "🚫 Vous avez déjà partagé une photo cette semaine 🚫\n"
+                "Merci d'attendre la semaine prochaine pour en partager une nouvelle ou sinon vous pouvez supprimer et reposter"
             )
             return
         
@@ -200,14 +200,15 @@ async def share_photo(interaction: discord.Interaction):
         last_photo_call = datetime.now(timezone.utc)
         message = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 
-Une **nouvelle semaine** commence ✨ 
+Une **nouvelle semaine** commence ✨
+
 C'est le moment idéal pour partager vos plus belles photos dans ce canal 📸
 
 **__Rappel des règles__** :
 
-• Vous pouvez poster **1 seule photo** jusqu'à samedi 00:00
+• Vous pouvez poster **1 seule photo** jusqu'à samedi matin
 • Merci de ne pas écrire de texte dans ce canal (photo uniquement)
-• Les votes auront lieu de **samedi 00:00** à **dimanche 18:00** 🗳️
+• Les votes auront lieu de **samedi matin** à **dimanche soir** 🗳️
 • Le ou la gagnant(e) sera annoncé(e) **dimanche soir** 🏆
 
 Bonne chance à toutes et à tous, et amusez-vous bien 🎉"""
@@ -279,11 +280,13 @@ async def open_votes(interaction: discord.Interaction):
 
 Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
 
-• Vous pouvez voter pour plusieurs photos
-• Les votes sont ouverts jusqu'à dimanche 18h00
+**__Rappel des règles__** :
+
+• Vous ne pouvez voter qu'une seule photo
+• Les votes sont ouverts jusqu'à dimanche soir
 • Le/la gagnant(e) sera annoncé(e) dimanche soir
 
-**📸 __Voici les photos soumises :__**
+**📸 __Voici les photos soumises cette semaine :__**
 ⠀"""
 
     await thread.send(intro)
@@ -456,7 +459,7 @@ Voici les photos gagnantes :"""
             last_4 = previous_data[-4:]
             month_year = datetime.now().strftime('%B %Y')
             monthly_thread = await results_channel.create_thread(
-                name=f"📅 Monthly Contest - {month_year}",
+                name=f"📅 Concours Photo Mensuel - {month_year}",
                 auto_archive_duration=1440
             )
             
@@ -464,9 +467,13 @@ Voici les photos gagnantes :"""
 
 **🗳️ Concours mensuel !**
 
+**🗳️ La phase de votes est ouverte !**
+
+**__Rappel des règles__** :
+
 Les 4 photos gagnantes des dernières semaines sont en compétition. Votez pour votre préférée avec {VOTE_EMOJI} !"
 
-**📸 __Voici les photos soumises :__**
+**📸 __Voici les photos gagnantes des 4 dernières semaines :__**
 ⠀"""
 
             await monthly_thread.send(introMonth)
@@ -517,7 +524,7 @@ async def close_monthly_vote(interaction: discord.Interaction):
         monthly_thread = None
         month_year = datetime.now().strftime('%B %Y')
         for thread in active_threads:
-            if thread.parent_id == PHOTO_RESULT_CHANNEL_ID and thread.name.startswith("📅 Monthly Contest") and month_year in thread.name:
+            if thread.parent_id == PHOTO_RESULT_CHANNEL_ID and thread.name.startswith("📅 Concours Photo Mensuel") and month_year in thread.name:
                 monthly_thread = thread
                 break
         if not monthly_thread:
@@ -591,13 +598,13 @@ async def close_monthly_vote(interaction: discord.Interaction):
             result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 
 🏆 **Le gagnant du concours mensuel est <@{winner_id}> avec {max_votes} votes !**\n\nFélicitations ! Voici la photo gagnante :
-Lien vers le fil de vote : {thread_link}
+🔗 **Voir le fil des votes ici :**{thread_link}
 ⠀"""
         else:
             authors = ", ".join(f"<@{data['author_id']}>" for _, data in eligible_winners)
             result = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 🏆 **Égalité ! Les gagnants du mois sont {authors} avec {max_votes} votes chacun !**\n\nFélicitations ! Voici les photos gagnantes :
-Lien vers le fil de vote : {thread_link}
+🔗 **Voir le fil des votes ici :**{thread_link}
 ⠀"""
         await results_channel.send(result)
         for _, data in eligible_winners:
