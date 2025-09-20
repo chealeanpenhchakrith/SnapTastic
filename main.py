@@ -29,6 +29,53 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="/", intents=intents)
 
+# Command: List weekly winners
+@bot.tree.command(name="liste-gagnants-hebdo", description="Affiche la liste des gagnants hebdomadaires")
+async def list_weekly_winners(interaction: discord.Interaction):
+    import json
+    json_path = os.path.join(os.path.dirname(__file__), "weekly-winner.json")
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        await interaction.response.send_message("Impossible de lire le fichier weekly-winner.json.", ephemeral=True)
+        return
+    if not data:
+        await interaction.response.send_message("Aucun gagnant hebdomadaire enregistré.", ephemeral=True)
+        return
+    lines = []
+    for entry in data:
+        date = entry.get("date", "?")
+        winners = entry.get("winner_ids", [])
+        mentions = ", ".join(f"<@{uid}>" for uid in winners)
+        lines.append(f"**{date}** : {mentions}")
+    msg = "🏆 **Liste des gagnants hebdomadaires :**\n" + "\n".join(lines)
+    await interaction.response.send_message(msg, ephemeral=True)
+
+# Command: List monthly winners
+@bot.tree.command(name="liste-gagnants-mensuels", description="Affiche la liste des gagnants mensuels")
+async def list_monthly_winners(interaction: discord.Interaction):
+    import json
+    json_path = os.path.join(os.path.dirname(__file__), "monthly-winner.json")
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        await interaction.response.send_message("Impossible de lire le fichier monthly-winner.json.", ephemeral=True)
+        return
+    if not data:
+        await interaction.response.send_message("Aucun gagnant mensuel enregistré.", ephemeral=True)
+        return
+    lines = []
+    for entry in data:
+        date = entry.get("date", "?")
+        winners = entry.get("winner_ids", [])
+        mentions = ", ".join(f"<@{uid}>" for uid in winners)
+        votes = entry.get("votes", "?")
+        lines.append(f"**{date}** : {mentions} ({votes} votes)")
+    msg = "🏆 **Liste des gagnants mensuels :**\n" + "\n".join(lines)
+    await interaction.response.send_message(msg, ephemeral=True)
+
 # --- Track user votes per voting thread ---
 user_votes_per_thread = defaultdict(dict)  # {thread_id: {user_id: message_id}}
 
