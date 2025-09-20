@@ -249,8 +249,9 @@ async def remove_weekly_winner(interaction: discord.Interaction, user: discord.M
 @bot.tree.command(name="ouverture-des-votes", description="Ouvre la phase des votes")
 async def open_votes(interaction: discord.Interaction):
     global last_photo_call
+    await interaction.response.defer(ephemeral=True)
     if not last_photo_call:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ Aucun appel à photos n'a été fait. Utilisez d'abord /partage-photo",
             ephemeral=True
         )
@@ -261,19 +262,19 @@ async def open_votes(interaction: discord.Interaction):
         name=f"📊 Votes - {datetime.now().strftime('%d/%m/%Y')}",
         auto_archive_duration=1440
     )
-    
+
     messages = []
     async for message in photo_channel.history(limit=100):
         if message.created_at < last_photo_call:
             break
         if message.attachments:
             messages.append(message)
-    
+
     if not messages:
         await thread.send("Aucune photo n'a été partagée depuis l'appel !")
-        await interaction.response.send_message("Fil créé, mais aucune photo trouvée", ephemeral=True)
+        await interaction.followup.send("Fil créé, mais aucune photo trouvée", ephemeral=True)
         return
-    
+
     intro = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 
 **🗳️ La phase de votes est ouverte !**
@@ -293,16 +294,16 @@ Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
     for msg in reversed(messages):
         # Modified - URL should display cleanly in Discord without filename
         photo_message = await thread.send(
-        content=f"Photo de {msg.author.mention}:",
-        embed=discord.Embed().set_image(url=msg.attachments[0].url)
+            content=f"Photo de {msg.author.mention}:",
+            embed=discord.Embed().set_image(url=msg.attachments[0].url)
         )
         await photo_message.add_reaction(VOTE_EMOJI)
-    
+
     # Reset for next week
     user_submissions.clear()
     last_photo_call = None
-    
-    await interaction.response.send_message("Phase de votes ouverte !", ephemeral=True)
+
+    await interaction.followup.send("Phase de votes ouverte !", ephemeral=True)
 
 import json
 
