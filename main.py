@@ -452,7 +452,8 @@ Voici les photos gagnantes :"""
         # Wait for content to be processed
         await asyncio.sleep(3)
 
-        # Do not archive or lock the thread; keep it visible for users
+        # Lock and archive the voting thread after announcing results
+        await voting_thread.edit(archived=True, locked=True)
         await results_channel.send(f"🔗 **Voir le fil des votes ici :** <#{voting_thread.id}>")
 
         # --- Monthly contest logic ---
@@ -463,12 +464,12 @@ Voici les photos gagnantes :"""
                 name=f"📅 Concours Photo Mensuel - {month_year}",
                 auto_archive_duration=1440
             )
-            
+
             introMonth = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 
 **🗳️ Concours mensuel !**
 
-**🗳️ La phase de votes est ouverte !**
+**La phase de votes est ouverte !**
 
 **__Rappel des règles__** :
 
@@ -485,11 +486,14 @@ Les 4 photos gagnantes des dernières semaines sont en compétition. Votez pour 
                     found = False
                     for thread in active_threads:
                         if thread.parent_id == PHOTO_CHANNEL_ID and thread.name.startswith("📊 Votes"):
+                            import re
+                            user_mention_pattern = re.compile(r'<@([0-9]+)>')
                             async for msg in thread.history(limit=None):
                                 if msg.embeds and len(msg.embeds) > 0:
                                     mention = msg.content.split("Photo de ")[1].rstrip(":") if "Photo de " in msg.content else ""
-                                    if mention.startswith("<@") and mention.endswith(">"):
-                                        uid = int(mention.replace("<@","").replace(">","").strip())
+                                    match = user_mention_pattern.match(mention)
+                                    if match:
+                                        uid = int(match.group(1))
                                         if uid == winner_id:
                                             monthly_msg = await monthly_thread.send(
                                                 content=f"Photo gagnante de <@{winner_id}>:",
@@ -611,6 +615,8 @@ async def close_monthly_vote(interaction: discord.Interaction):
         for _, data in eligible_winners:
             embed = discord.Embed().set_image(url=data['image_url'])
             await results_channel.send(embed=embed)
+        # Lock and archive the monthly contest thread after announcing results
+        await monthly_thread.edit(archived=True, locked=True)
         await interaction.followup.send("✅ Votes mensuels terminés et résultats annoncés !", ephemeral=True)
     except Exception as e:
         print(f"Error in close_monthly_vote: {e}")
