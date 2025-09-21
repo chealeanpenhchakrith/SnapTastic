@@ -438,23 +438,46 @@ async def close_votes(interaction: discord.Interaction):
         for entry in previous_data:
             previous_winner_ids.update(entry.get("winner_ids", []))
 
-        # Find winner(s) excluding previous winners
-        max_votes = max(data['votes'] for data in vote_counts.values())
-        eligible_winners = []
+        # Build a list of all candidates with their vote counts and user IDs
+        candidates = []  # (user_id, votes, msg, data)
         for msg, data in vote_counts.items():
-            # Extract user ID from mention string
             try:
                 mention = msg.content.split("Photo de ")[1].rstrip(":")
                 if mention.startswith("<@") and mention.endswith(">"):
-                    user_id = int(mention.replace("<@","").replace(">","").strip())
-                    if data['votes'] == max_votes and user_id not in previous_winner_ids:
-                        eligible_winners.append((msg, data, user_id))
+                    user_id = int(mention.replace("<@", "").replace(">", "").strip())
+                    candidates.append((user_id, data['votes'], msg, data))
             except Exception:
                 pass
 
+        # Sort candidates by vote count in descending order
+        candidates.sort(key=lambda x: x[1], reverse=True)
+
+        # Find eligible winners by checking vote counts from highest to lowest
+        eligible_winners = []
+        checked_vote_counts = set()
+        
+        for user_id, votes, msg, data in candidates:
+            # Skip if we already processed this vote count
+            if votes in checked_vote_counts:
+                continue
+                
+            # Get all candidates with this vote count who are eligible (haven't won before)
+            candidates_with_this_vote_count = [
+                (m, d, uid) for uid, v, m, d in candidates 
+                if v == votes and uid not in previous_winner_ids
+            ]
+            
+            # If we found eligible candidates with this vote count, they are our winners
+            if candidates_with_this_vote_count:
+                eligible_winners = candidates_with_this_vote_count
+                break
+                
+            # Mark this vote count as checked
+            checked_vote_counts.add(votes)
+
         # Format results message
         if not eligible_winners:
-            result = "❌ Aucun gagnant éligible cette semaine (tous les top-votés ont déjà gagné auparavant)."
+            result = "❌ Aucun gagnant éligible cette semaine (tous les membres sans victoire n'ont pas reçu de votes)."
             await results_channel.send(result)
             await interaction.followup.send(
                 "Votes terminés, mais aucun nouveau gagnant possible !",
@@ -467,12 +490,14 @@ async def close_votes(interaction: discord.Interaction):
 
         if len(eligible_winners) == 1:
             _, winner_data, winner_id = eligible_winners[0]
-            result = f"""🏆 **Le gagnant de la semaine est <@{winner_id}> avec {max_votes} votes !**
+            winner_votes = winner_data['votes']
+            result = f"""🏆 **Le gagnant de la semaine est <@{winner_id}> avec {winner_votes} votes !**
 
 Félicitations ! Voici la photo gagnante :"""
         else:
             authors = ", ".join(f"<@{winner_id}>" for _, _, winner_id in eligible_winners)
-            result = f"""🏆 **Nous avons une égalité avec {max_votes} votes chacun !**
+            winner_votes = eligible_winners[0][1]['votes']  # All winners have the same vote count
+            result = f"""🏆 **Nous avons une égalité avec {winner_votes} votes chacun !**
             
 Félicitations à {authors} !
 
