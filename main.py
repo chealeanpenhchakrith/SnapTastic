@@ -438,63 +438,68 @@ async def close_votes(interaction: discord.Interaction):
         for entry in previous_data:
             previous_winner_ids.update(entry.get("winner_ids", []))
 
-        # Find winner(s) excluding previous winners
-        max_votes = max(data['votes'] for data in vote_counts.values())
-        eligible_winners = []
-        for msg, data in vote_counts.items():
-            # Extract user ID from mention string
-            try:
-                mention = msg.content.split("Photo de ")[1].rstrip(":")
-                if mention.startswith("<@") and mention.endswith(">"):
-                    user_id = int(mention.replace("<@","").replace(">","").strip())
-                    if data['votes'] == max_votes and user_id not in previous_winner_ids:
-                        eligible_winners.append((msg, data, user_id))
-            except Exception:
-                pass
+            # Find all user_ids and their votes
+            user_votes = []
+            for msg, data in vote_counts.items():
+                try:
+                    mention = msg.content.split("Photo de ")[1].rstrip(":")
+                    if mention.startswith("<@") and mention.endswith(">"):
+                        user_id = int(mention.replace("<@","").replace(">","").strip())
+                        user_votes.append((msg, data, user_id, data['votes']))
+                except Exception:
+                    pass
 
-        # Format results message
-        if not eligible_winners:
-            result = "❌ Aucun gagnant éligible cette semaine (tous les top-votés ont déjà gagné auparavant)."
-            await results_channel.send(result)
-            await interaction.followup.send(
-                "Votes terminés, mais aucun nouveau gagnant possible !",
-                ephemeral=True
-            )
-            # Archive thread
-            await asyncio.sleep(3)
-            await voting_thread.edit(archived=True, locked=True)
-            return
+            # Filter out previous winners
+            eligible_user_votes = [(msg, data, user_id, votes) for msg, data, user_id, votes in user_votes if user_id not in previous_winner_ids]
 
-        if len(eligible_winners) == 1:
-            _, winner_data, winner_id = eligible_winners[0]
-            result = f"""🏆 **Le gagnant de la semaine est <@{winner_id}> avec {max_votes} votes !**
+            if not eligible_user_votes:
+                result = "❌ Aucun gagnant éligible cette semaine (tous les membres ont déjà gagné auparavant)."
+                await results_channel.send(result)
+                await interaction.followup.send(
+                    "Votes terminés, mais aucun nouveau gagnant possible !",
+                    ephemeral=True
+                )
+                await asyncio.sleep(3)
+                await voting_thread.edit(archived=True, locked=True)
+                return
 
-Félicitations ! Voici la photo gagnante :"""
-        else:
-            authors = ", ".join(f"<@{winner_id}>" for _, _, winner_id in eligible_winners)
-            result = f"""🏆 **Nous avons une égalité avec {max_votes} votes chacun !**
+            # Find the highest vote count among eligible members
+            max_eligible_votes = max(votes for _, _, _, votes in eligible_user_votes)
+            eligible_winners = [(msg, data, user_id) for msg, data, user_id, votes in eligible_user_votes if votes == max_eligible_votes]
+
+            if len(eligible_winners) == 1:
+                _, winner_data, winner_id = eligible_winners[0]
+                result = f"""🏆 **Le gagnant de la semaine est <@{winner_id}> avec {max_eligible_votes} votes !**
+
+            Félicitations ! Voici la photo gagnante :"""
+            else:
+                authors = ", ".join(f"<@{winner_id}>" for _, _, winner_id in eligible_winners)
+                result = f"""🏆 **Nous avons une égalité avec {max_eligible_votes} votes chacun !**
             
-Félicitations à {authors} !
+            Félicitations à {authors} !
 
-Voici les photos gagnantes :"""
+            Voici les photos gagnantes :"""
 
-        # Send results
-        await results_channel.send(result)
 
-        # Send winning photos using cached URLs
-        for msg, data, _ in eligible_winners:
-            embed = discord.Embed().set_image(url=data['image_url'])
-            await results_channel.send(embed=embed)
 
-        # Store winner user IDs in weekly-winner.json
-        winner_ids = [winner_id for _, _, winner_id in eligible_winners]
-        week_entry = {
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "winner_ids": winner_ids
-        }
-        previous_data.append(week_entry)
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(previous_data, f, ensure_ascii=False, indent=2)
+        # Only announce and update if there are eligible winners
+        if 'eligible_winners' in locals() and eligible_winners:
+            await results_channel.send(result)
+            for msg, data, _ in eligible_winners:
+                embed = discord.Embed().set_image(url=data['image_url'])
+                await results_channel.send(embed=embed)
+            # Store winner user IDs in weekly-winner.json
+            winner_ids = [winner_id for _, _, winner_id in eligible_winners]
+            week_entry = {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "winner_ids": winner_ids
+            }
+            previous_data.append(week_entry)
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(previous_data, f, ensure_ascii=False, indent=2)
+        else:
+            # Fallback: no eligible winners
+            await results_channel.send("❌ Aucun résultat disponible pour cette semaine.")
 
         # Wait for content to be processed
         await asyncio.sleep(3)
