@@ -6,6 +6,7 @@ from discord import app_commands
 from dotenv import load_dotenv
 from collections import defaultdict
 from datetime import datetime, timezone
+import re
 
 # Load variables from .env files
 load_dotenv()
@@ -282,23 +283,47 @@ async def close_votes(interaction: discord.Interaction):
             )
             return
         
-        # Cache image URLs and collect votes
-        vote_counts = {}
+        # Cache image URLs and collect votes. Store numeric author IDs for reliability.
+        vote_counts = {}  # {message_id: {votes, author_id, image_url}}
         cached_images = {}
-        
+
         async for message in voting_thread.history(limit=None):
             if message.embeds and len(message.embeds) > 0:
-                author = message.content.split("Photo de ")[1].rstrip(":")
+                # Try to get the author ID from mentions first (most reliable),
+                # then fall back to regex extraction from the content.
+                author_id = None
+                if message.mentions:
+                    try:
+                        author_id = message.mentions[0].id
+                    except Exception:
+                        author_id = None
+                if author_id is None:
+                    m = re.search(r"<@!?(?P<id>\d+)>", message.content)
+                    if m:
+                        try:
+                            author_id = int(m.group("id"))
+                        except Exception:
+                            author_id = None
+                # As a last resort, try to parse any digits after 'Photo de '
+                if author_id is None:
+                    try:
+                        mention_part = message.content.split("Photo de ")[1].rstrip(":")
+                        digits = re.search(r"(\d+)", mention_part)
+                        if digits:
+                            author_id = int(digits.group(1))
+                    except Exception:
+                        author_id = None
+
                 cached_images[message.id] = message.embeds[0].image.url
-                
+
                 for reaction in message.reactions:
                     if str(reaction.emoji) == VOTE_EMOJI:
-                        vote_counts[message] = {
-                            'votes': reaction.count - 1,
-                            'author': author,
+                        vote_counts[message.id] = {
+                            'votes': max(0, reaction.count - 1),
+                            'author_id': author_id,
                             'image_url': cached_images[message.id]
                         }
-                        print(f"Found photo by {author} with {reaction.count - 1} votes")
+                        print(f"Found photo by {author_id} with {reaction.count - 1} votes")
                         break
         
         if not vote_counts:
@@ -316,19 +341,24 @@ async def close_votes(interaction: discord.Interaction):
         for entry in previous_data:
             previous_winner_ids.update(entry.get("winner_ids", []))
 
-        # Find winner(s) excluding previous winners
-        max_votes = max(data['votes'] for data in vote_counts.values())
+        # Find winner(s) by ignoring previous winners entirely when computing top votes.
+        # Build a dict of eligible candidates (authors who have NOT previously won).
+        eligible_vote_counts = {
+            msg_id: data
+            for msg_id, data in vote_counts.items()
+            if data.get('author_id') is not None and data.get('author_id') not in previous_winner_ids
+        }
+
         eligible_winners = []
-        for msg, data in vote_counts.items():
-            # Extract user ID from mention string
-            try:
-                mention = msg.content.split("Photo de ")[1].rstrip(":")
-                if mention.startswith("<@") and mention.endswith(">"):
-                    user_id = int(mention.replace("<@","").replace(">","").strip())
-                    if data['votes'] == max_votes and user_id not in previous_winner_ids:
-                        eligible_winners.append((msg, data, user_id))
-            except Exception:
-                pass
+        if eligible_vote_counts:
+            # Compute max among eligible candidates only
+            max_votes = max(data['votes'] for data in eligible_vote_counts.values())
+            for msg_id, data in eligible_vote_counts.items():
+                if data['votes'] == max_votes:
+                    eligible_winners.append((msg_id, data, data['author_id']))
+        else:
+            # No eligible candidates (all submitters already won previously)
+            eligible_winners = []
 
         # Format results message
         if not eligible_winners:
