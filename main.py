@@ -201,6 +201,11 @@ async def open_votes(interaction: discord.Interaction):
         )
         return
 
+    # Acknowledge the interaction immediately because we do multiple
+    # long-running API calls (creating threads, iterating history, adding reactions).
+    # Deferring gives us more time and lets us use followup.send(...) later.
+    await interaction.response.defer(ephemeral=True)
+
     photo_channel = bot.get_channel(PHOTO_CHANNEL_ID)
     thread = await photo_channel.create_thread(
         name=f"📊 Votes - {datetime.now().strftime('%d/%m/%Y')}",
@@ -216,7 +221,7 @@ async def open_votes(interaction: discord.Interaction):
     
     if not messages:
         await thread.send("Aucune photo n'a été partagée depuis l'appel !")
-        await interaction.response.send_message("Fil créé, mais aucune photo trouvée", ephemeral=True)
+        await interaction.followup.send("Fil créé, mais aucune photo trouvée", ephemeral=True)
         return
     
     intro = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
@@ -245,7 +250,7 @@ Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
     user_submissions.clear()
     last_photo_call = None
     
-    await interaction.response.send_message("Phase de votes ouverte !", ephemeral=True)
+    await interaction.followup.send("Phase de votes ouverte !", ephemeral=True)
 
 import json
 
