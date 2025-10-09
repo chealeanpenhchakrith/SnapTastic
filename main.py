@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from collections import defaultdict
 from datetime import datetime, timezone
 import re
+import json
 
 # Load variables from .env files
 load_dotenv()
@@ -191,6 +192,53 @@ async def remove_weekly_winner(interaction: discord.Interaction, user: discord.M
         await interaction.response.send_message(f"L'objet contenant '{user.display_name}' a été supprimé de la liste des gagnants hebdomadaires.", ephemeral=True)
     else:
         await interaction.response.send_message(f"Aucun objet trouvé pour '{user.display_name}' dans la liste des gagnants.", ephemeral=True)
+
+
+@bot.tree.command(name="liste-gagnants", description="Affiche la liste des gagnants hebdomadaires")
+async def list_winners(interaction: discord.Interaction):
+    """Affiche le contenu de weekly-winner.json de façon lisible.
+    Le résultat est envoyé en message éphemère. Si le contenu est trop long, envoie un fichier.
+    """
+    json_path = os.path.join(os.path.dirname(__file__), "weekly-winner.json")
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        await interaction.response.send_message("Impossible de lire weekly-winner.json.", ephemeral=True)
+        return
+
+    if not data:
+        await interaction.response.send_message("Aucun gagnant enregistré.", ephemeral=True)
+        return
+
+    lines = ["**Liste des gagnants hebdomadaires :**"]
+    for entry in data:
+        date = entry.get("date", "?")
+        ids = entry.get("winner_ids", [])
+        if not ids:
+            lines.append(f"{date}: Aucun gagnant")
+            continue
+        parts = []
+        for uid in ids:
+            try:
+                member = interaction.guild.get_member(int(uid)) if interaction.guild else None
+            except Exception:
+                member = None
+            if member:
+                parts.append(member.display_name)
+            else:
+                parts.append(f"<@{uid}>")
+        lines.append(f"{date}: " + ", ".join(parts))
+
+    content = "\n".join(lines)
+
+    # If content too long for a discord message, send as file
+    if len(content) > 1900:
+        import io
+        buf = io.BytesIO(content.encode('utf-8'))
+        await interaction.response.send_message("La liste est trop longue, je l'envoie en fichier.", file=discord.File(buf, filename="weekly-winner-list.txt"), ephemeral=True)
+    else:
+        await interaction.response.send_message(content, ephemeral=True)
 
 @bot.tree.command(name="ouverture-des-votes", description="Ouvre la phase des votes")
 async def open_votes(interaction: discord.Interaction):
