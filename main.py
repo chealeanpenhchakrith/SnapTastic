@@ -279,7 +279,7 @@ async def open_votes(interaction: discord.Interaction):
 
 Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
 
-• Vous pouvez voter pour plusieurs photos
+• Vous pouvez voter pour une seule photo
 • Les votes sont ouverts jusqu'à dimanche 18h00
 • Le/la gagnant(e) sera annoncé(e) dimanche soir
 
