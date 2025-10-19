@@ -57,7 +57,7 @@ async def on_reaction_add(reaction, user):
     if voted_msg_id is not None and voted_msg_id != message.id:
         await reaction.remove(user)
         try:
-            await user.send("❌ Vous ne pouvez voter que pour une seule photo !")
+            await user.send("⚠️ Vous ne pouvez voter que pour une seule photo ⚠️")
         except Exception:
             pass
         return
@@ -109,24 +109,24 @@ async def on_message(message):
         if len(message.attachments) == 0:
             await message.delete()
             await message.author.send(
-                "❌ Les messages texte ne sont **pas autorisés** dans le canal photo.\n"
-                "Merci de ne poster que **des photos**."
+                "⚠️ Les messages texte ne sont **pas autorisés** dans le canal photo ⚠️\n"
+                "✅ Merci de ne poster qu'une seule **photo** durant la phase de partage photo ✅"
             )
             return
 
         # If messages has more than 1 image
-        if len(message.attachments) > 1:
-            await message.delete()
-            await message.author.send(
-                "❌ Vous ne pouvez poster qu'**une seule photo** par semaine.\n"
-                "Merci de ne partager qu'une seule image à la fois."
-            )
+        # if len(message.attachments) > 1:
+        #     await message.delete()
+        #     await message.author.send(
+        #         "⚠️ Vous ne pouvez poster qu'**une seule photo** par semaine, si vous souhaitez remplacer votre photo déjà postée, vous pouvez supprimer et reposter tant que cela reste une seule photo de votre part ⚠️\n"
+        #         "✅ Merci de ne partager qu'une seule image à la fois ✅"
+        #     )
         
         if user_submissions[user_id] >= 1:
             await message.delete()
             await message.author.send(
-                "❌ Vous avez déjà partagé une photo cette semaine.\n"
-                "Merci d'attendre la semaine prochaine pour en partager une nouvelle."
+                "⚠️ Vous avez déjà partagé une photo cette semaine, si vous souhaitez remplacer votre photo déjà postée, vous pouvez supprimer et reposter tant que cela reste une seule photo de votre part ⚠️\n"
+                "✅ Merci d'attendre la semaine prochaine pour en partager une nouvelle ✅"
             )
             return
         
@@ -153,9 +153,10 @@ C'est le moment idéal pour partager vos plus belles photos dans ce canal 📸
 
 **__Rappel des règles__** :
 
-• Vous pouvez poster **1 seule photo** jusqu'à samedi 00:00
+• Un gagnant hebdomadaire ne peut pas regagner une autre semaine du même mois, pour laisser la chance aux autres
+• Vous pouvez poster **1 seule photo** jusqu'au vendredi
 • Merci de ne pas écrire de texte dans ce canal (photo uniquement)
-• Les votes auront lieu de **samedi 00:00** à **dimanche 18:00** 🗳️
+• Les votes auront lieu de **samedi** au **dimanche 18h**
 • Le ou la gagnant(e) sera annoncé(e) **dimanche soir** 🏆
 
 Bonne chance à toutes et à tous, et amusez-vous bien 🎉"""
@@ -245,7 +246,7 @@ async def open_votes(interaction: discord.Interaction):
     global last_photo_call
     if not last_photo_call:
         await interaction.response.send_message(
-            "❌ Aucun appel à photos n'a été fait. Utilisez d'abord /partage-photo",
+            "⚠️ Aucun appel à photos n'a été fait. Utilisez d'abord /partage-photo ⚠️",
             ephemeral=True
         )
         return
@@ -275,12 +276,15 @@ async def open_votes(interaction: discord.Interaction):
     
     intro = f"""Bonjour <@&{REPORTER_ROLE_ID}> <@&{REPORTER_BORDEAUX_ROLE_ID}> !
 
-**🗳️ La phase de votes est ouverte !**
+**La phase de votes est ouverte !**
 
-Pour voter, réagissez avec {VOTE_EMOJI} sur vos photos préférées.
+Pour voter, réagissez avec {VOTE_EMOJI} sur votre photo préférée de cette semaine.
 
+**__Rappel des règles__** :
+
+• Ne pas ajouter de photos durant le vote, sinon elle sera supprimée
 • Vous pouvez voter pour une seule photo
-• Les votes sont ouverts jusqu'à dimanche 18h00
+• Les votes sont ouverts jusqu'à dimanche 18h
 • Le/la gagnant(e) sera annoncé(e) dimanche soir
 
 **📸 __Voici les photos soumises :__**
@@ -410,7 +414,7 @@ async def close_votes(interaction: discord.Interaction):
 
         # Format results message
         if not eligible_winners:
-            result = "❌ Aucun gagnant éligible cette semaine (tous les top-votés ont déjà gagné auparavant)."
+            result = "❌ Aucun gagnant éligible cette semaine (tous les top-votés ont déjà gagné auparavant). Rappel : un gagnant hebdomadaire ne peut pas regagner d'autres concours hebdomadaires durant le mois."
             await results_channel.send(result)
             await interaction.followup.send(
                 "Votes terminés, mais aucun nouveau gagnant possible !",
@@ -423,16 +427,21 @@ async def close_votes(interaction: discord.Interaction):
 
         if len(eligible_winners) == 1:
             _, winner_data, winner_id = eligible_winners[0]
-            result = f"""🏆 **Le gagnant de la semaine est <@{winner_id}> avec {max_votes} votes !**
+            result = f"""🏅 Nouveau Gagnant !
+La semaine passée, avec {max_votes} vote(s), notre gagnant(e) est ** <@{winner_id}> avec sa superbe photo !**
 
-Félicitations ! Voici la photo gagnante :"""
+**Voici la photo gagnante** :
+
+"""
         else:
             authors = ", ".join(f"<@{winner_id}>" for _, _, winner_id in eligible_winners)
-            result = f"""🏆 **Nous avons une égalité avec {max_votes} votes chacun !**
-            
-Félicitations à {authors} !
+            result = f"""🏅 Nouveaux Gagnants !
+La semaine passée, avec {max_votes} votes, nos gagnant(e)s sont ** {authors} avec leurs superbes photos !**
+🏆 **Nous avons une égalité avec {max_votes} votes chacun !**
 
-Voici les photos gagnantes :"""
+Voici les photos gagnantes :
+
+"""
 
         # Send results
         await results_channel.send(result)
@@ -456,7 +465,17 @@ Voici les photos gagnantes :"""
         await asyncio.sleep(3)
 
         # Do not archive or lock the thread; keep it visible for users
-        await results_channel.send(f"🔗 **Voir le fil des votes ici :** <#{voting_thread.id}>")
+        await results_channel.send(f"""**Voir le fil des votes ici : ** <#{voting_thread.id}>
+                                   
+✨ N'hésitez pas à nous proposer vos photographies !
+Au-delà du petit concours, c'est surtout pour se partager nos photos à toutes et découvrir de nouveaux styles, de nouvelles manières de faire ! Et ce peu importe votre niveau 😄
+
+ℹ️ Comment participer
+Tout se passe dans  <#{895630276787576832}> ! Postez vos photos et attendez les votes !
+
+👉 Nouvelle semaine !
+La prochaine vague de photos peut être envoyée jusqu'à samedi non inclus !
+                                   """)
         await interaction.followup.send(
             "✅ Votes terminés et résultats annoncés !",
             ephemeral=True
